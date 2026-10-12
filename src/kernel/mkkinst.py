@@ -11,12 +11,12 @@ import hashlib, os, struct, subprocess
 
 D = os.path.dirname(os.path.abspath(__file__))
 blob = open(f'{D}/build/elfix.bin', 'rb').read()
-CAVE, STAT, CAVE_END, EN = 0x7e98be80, 0x7e98c648, 0x7e98c7c0, 1171   # EN: 1 scan|2 rewrite|16|128 clamp|1024 stop
+CAVE, STAT, CAVE_END, EN = 0x7e98be80, 0x7e98c748, 0x7e98c7c0, 3219   # EN: 1 scan|2 rewrite|16|128 clamp|1024 stop|2048 EL SPS guard
 assert CAVE + len(blob) == CAVE_END
 # md5 of the lowercase hex dump of each original cave chunk (_FbmCli_Test_4K, a CLI-only test function)
-ORIG_MD5 = {0x7e98be80: '20fda5a2aa0c88fd07884b2b3364eea1', 0x7e98c000: '9655f2629e5b40c97963ebda2224f2e5',
-            0x7e98c648: '84381b1bfe1f11ab04b65f352773e4ec'}
-chunks = [(0x7e98be80, 0x7e98c000), (0x7e98c000, 0x7e98c648), (0x7e98c648, 0x7e98c7c0)]   # page / code / data
+ORIG_MD5 = {0x7e98be80: '20fda5a2aa0c88fd07884b2b3364eea1', 0x7e98c000: '829543b6531490f4e7bf9c18348de5f8',
+            0x7e98c748: '11a4b898f069093cc19eb1dee12733fd'}
+chunks = [(0x7e98be80, 0x7e98c000), (0x7e98c000, 0x7e98c748), (0x7e98c748, 0x7e98c7c0)]   # page / code / data
 syms = {}
 for l in subprocess.run(['llvm-nm', f'{D}/build/elfix.elf'], capture_output=True, text=True).stdout.split('\n'):
     p = l.split()
@@ -28,12 +28,14 @@ sites = [  # (VA, original instruction, patched instruction)
     (0x7e9fa2dc, bytes.fromhex('c8209fe5'), b(0x7e9fa2dc, syms['rd_entry'])),    # i4ESM_FifoRdPtrSet
     (0x7e9c0c48, bytes.fromhex('0cfdf8eb'), bl(0x7e9c0c48, syms['sync_stub'])),  # u4VDP_AssignSyncCtrl (debug-print bl)
     (0x7eaac99c, bytes.fromhex('070050e3'), b(0x7eaac99c, syms['vdp_entry'])),   # VDec_Stop
+    (0x7eb26d9c, bytes.fromhex('dfecffeb'), bl(0x7eb26d9c, syms['spsfix'])),     # bl i4VDecH265SPSPsr (Parse_Syntax_Proc)
+    (0x7eb215cc, bytes.fromhex('7dfcffeb'), bl(0x7eb215cc, syms['ppfix'])),      # bl vH265PreParseSPS (Pre_Parse_SPS_Proc)
 ]
 # Fingerprint of the bdpdrv1 module the blob was built for (read-only check before anything is written):
 # continuation instructions after each hook, entry words of the module functions the blob calls, and the literal
 # pool words that hold the addresses of the module's global tables the blob reads.
 FPRINT = [(0x7ea9c7b8, '0150a0e1'), (0x7e9fa2e0, '08402de9'), (0x7eaac9a0, '37402de9'), (0x7e9c0c4c, '000055e3'),
-          (0x7e9a3f40, '020050e3'), (0x7eb5bc94, '70402de9'),
+          (0x7e9a3f40, '020050e3'), (0x7eb5bc94, '70402de9'), (0x7eb22120, 'f04f2de9'), (0x7eb26da0, '0090a0e1'), (0x7eb207c8, 'f04f2de9'), (0x7eb215d0, '050ca0e3'),
           (0x7e9fa3ac, 'ac1ce47e'), (0x7eabd2cc, '90e6e67e'), (0x7e9a41ec, '60cbe37e')]
 KSYMS = [('printk', 0x803f7df0), ('jiffies', 0x805760c0)]
 esc = lambda x: ''.join('\\x%02x' % c for c in x)

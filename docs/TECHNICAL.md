@@ -77,17 +77,19 @@ Pitfalls:
 | `0x7ea9c7b8`, `0x7e9fa2e0`, `0x7eaac9a0`, `0x7e9c0c4c` | original code | instruction after each hook point |
 | `0x7e9a3f40` | `020050e3` | `VDP_SetEnable` entry |
 | `0x7eb5bc94` | `70402de9` | `DOVI_CleanDCacheRange` entry |
+| `0x7eb22120`, `0x7eb207c8` | `f04f2de9` | `i4VDecH265SPSPsr`, `vH265PreParseSPS` entries |
+| `0x7eb26da0`, `0x7eb215d0` | original code | instruction after the two SPS hooks |
 | `0x7e9fa3ac` | `0x7ee41cac` | literal: ESM handle table |
 | `0x7eabd2cc` | `0x7ee6e690` | literal: VDEC instance table |
 | `0x7e9a41ec` | `0x7ee3cb60` | literal: VDP global state |
 
 It also checks:
 - `/proc/kallsyms`: `printk` at `0x803f7df0` and `jiffies` at `0x805760c0`;
-- the original or patched instruction at each of the 4 hook sites.
+- the original or patched instruction at each of the 6 hook sites.
 
 ### Code cave and hooks
 
-The cave is the dead CLI test function `_FbmCli_Test_4K`, `0x7e98be80..0x7e98c7c0`. Code runs up to `0x7e98c648`;
+The cave is the dead CLI test function `_FbmCli_Test_4K`, `0x7e98be80..0x7e98c7c0`. Code runs up to `0x7e98c748`;
 the counters and state (`elstat`) follow, up to `0x7e98c7c0`. `p7kel.sh` checks the original contents by md5 (three
 chunks: page split and code/data split), so no firmware bytes are shipped.
 
@@ -97,6 +99,8 @@ chunks: page split and code/data split), so no firmware bytes are shipped.
 | FIFO clamp | `i4ESM_FifoRdPtrSet` `0x7e9fa2dc` | `ldr r2,[pc,#0xc8]` (literal `0x7ee41cac`) | `rd_entry` → `rdfix(handle, rd)` returns the rd to use |
 | AV-sync guard | `u4VDP_AssignSyncCtrl` `0x7e9c0c48` | `bl` to a debug print (replaced) | `sync_stub` |
 | Stop | `VDec_Stop` `0x7eaac99c` | `cmp r0,#7` | `vdp_entry` → `vdp_off(esid)` |
+| EL SPS guard | `i4H265_Parse_Syntax_Proc` `0x7eb26d9c` | `bl i4VDecH265SPSPsr` | `spsfix(ctx, sps_base, pic)` |
+| EL pre-parse guard | `i4H265_Pre_Parse_SPS_Proc` `0x7eb215cc` | `bl vH265PreParseSPS` | `ppfix(esid, .., .., .., out)` |
 
 #### elfix (EL slice rewrite)
 
@@ -120,12 +124,30 @@ fifo_start, ...}`, all kernel linear-map addresses.
 - It never changes the BL's own releases. Holding the BL back to a lagging EL deadlocks TS playback with audio: the
   FIFO fills, the demux cannot deliver audio, and AV sync never starts.
 
-#### sync_stub (AV-sync guard)
+#### sync_stub (AV-sync redirect)
 
-At the replaced debug-print `bl`, r4 holds the VDP object (byte 0 = id) and r5 the query result.
-- For VDP0 it stores `jiffies` (at elstat+216).
-- For VDP1 with a successful query, it forces the "no SyncCtrl interface" path (`r5 |= 1`) unless VDP0 was assigned
-  within the last 500 jiffies (HZ = 100).
+At the replaced debug-print `bl`:
+- r4 holds the VDP object (byte 0 = id). The VDP objects are the per-plane state structs, and VDP0 = VDP1 − 0x880.
+- r5 holds the query result.
+- r7 holds the plane's previous controller.
+
+Behaviour:
+- **VDP0:** the stub sets a "seen" flag (elstat+80) and stores `jiffies` (elstat+88). It uses a flag rather than a
+  zero timestamp because `jiffies` starts at −300 s and wraps to 0 at 300 s uptime.
+- **VDP1 with a successful query:**
+  - if VDP0 was assigned within the last 500 jiffies (HZ = 100), as in TS or Blu-ray, the stub returns unchanged;
+  - otherwise (the P7 MKV path) it sets `r4 -= 0x880` and reloads `r7 = [r4+0x6c8]`. The rest of the firmware
+    function then attaches the controller to VDP0, exactly like single-layer MKV.
+
+#### spsfix / ppfix (EL SPS guard)
+
+After a seek or a trick-play restart, the EL decoder can parse the base layer's 3840×2160 SPS, which has the same
+SPS id. For the EL decoder (ESID 1, stream info at `*(0x7ee6e690 + 0xa8 + 4)`, single-stream flag at `+0x650ac`,
+EL flag at `+0x650af`), an SPS wider than 1920 is handled as follows:
+- **`spsfix`** marks the SPS invalid (`sps+0x2b4 = 0`, with `sps = base + sps_id*0x28a8`; width at `+0x450`) and
+  returns `0xff03`.
+- **`ppfix`** restores the previous pre-parse result. The output is `{w, h, x, valid}`, and the previous values
+  are at `out[4..7]`.
 
 #### vdp_off (stop)
 
@@ -134,16 +156,17 @@ lets the EL frame buffers be released, which is what the natural end-of-file pat
 
 ### Enable flags and counters
 
-`elstat+0x18` holds the enable mask; the release uses `1171`.
+`elstat+0x18` holds the enable mask; the release uses `3219`.
 
 | Bit | Meaning |
 |---|---|
 | 1 | scan (elfix active) |
 | 2 | rewrite slices |
 | 16 | legacy (always set) |
-| 64 | debug printk (`<7>ELH ...`, `<7>VDS ...`) |
+| 64 | unused (was debug printk during development) |
 | 128 | FIFO clamp |
 | 1024 | stop fix |
+| 2048 | EL SPS guard |
 
 `p7kel.sh status` prints the sites state and the first 32 bytes of `elstat`:
 

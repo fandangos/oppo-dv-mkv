@@ -67,8 +67,8 @@ With this fix installed:
 | DV profile 7 MEL (base + minimal enhancement layer, single track) | HDR10 (base layer only) | Dolby Vision (same code path as FEL, see [limitations](#known-limitations)) |
 | HDR10 / SDR | normal | normal (unchanged) |
 
-Audio (tested with AC-3 bitstreamed to an AV receiver), pause and resume, seeking, stopping and playing the next
-file all work. Discs and TS files keep working as before.
+Audio (tested with AC-3 and Dolby TrueHD Atmos bitstreamed to an AV receiver, with correct lip sync), pause and
+resume, seeking, fast-forward, stopping and playing the next file all work. Discs and TS files keep working as before.
 
 ## Better subtitles
 
@@ -172,8 +172,8 @@ The installer also works as an updater: running a newer release the same way rep
   them work.
 - **MP4 files with Dolby Vision** are not covered; they freeze the player even on stock firmware.
 - **Player-led (LLDV) mode** was not tested.
-- At the exact point of a **seek**, one or two enhancement-layer pictures may fail to decode. This is invisible in
-  practice, and the base layer and audio are unaffected.
+- At the exact point of a **seek** or a fast-forward step, one or two enhancement-layer pictures may fail to decode.
+  This is invisible in practice, and the base layer and audio are unaffected.
 
 ## Troubleshooting
 
@@ -255,19 +255,25 @@ the wrong place for those pictures.
 **Fix:** the hook uses the real ring bounds from the FIFO manager. It also never reads beyond the demuxer's current
 write position, and skips pictures it has already handled.
 
-### 5. Hard lock as soon as Dolby Vision starts, but only with audio
+### 5. Hard lock as soon as Dolby Vision starts with audio, and lip sync
 
 **Symptom:** P7 MKVs without audio played perfectly. The same files with audio hard-locked the whole player (no
 HDMI signal) the moment the Dolby Vision output started.
 
-**Cause:** in the MKV path the player gives the **enhancement-layer video plane** an AV-sync controller, which is
-slaved to the audio clock, but never gives one to the **base-layer** plane. TS and Blu-ray assign it to both
-planes, and MKV without audio assigns it to neither. The mismatch hard-locks the chip when the EL plane shows its
+**Cause:** for audio/video sync, each video plane can be attached to an AV-sync controller that follows the audio
+clock. With P7 MKV the player attaches the controller to the **enhancement-layer** plane, and never to the
+**base-layer** plane. TS and Blu-ray attach it to both planes, single-layer MKV to the base-layer plane, and MKV
+without audio to neither. The EL plane following the audio clock on its own hard-locks the chip when it shows its
 first picture. Setting the TV output to a fixed 24 Hz did not help; the lock is not caused by the HDMI mode switch.
 
-**Fix:** the EL plane is refused an AV-sync controller unless the base-layer plane was given one in the previous
-5 seconds. TS and Blu-ray therefore keep their normal behaviour, and the MKV case falls back to the same scheme as
-MKV without audio, which works.
+**Fix:** when the player offers the controller to the EL plane in the MKV case, the hook redirects it to the
+**base-layer plane**, which is what single-layer MKV does. If the base-layer plane was given one in the previous
+5 seconds (TS, Blu-ray), the firmware's own behaviour is kept.
+
+v1.0.0 and v1.1.0 refused the controller instead of redirecting it. That prevented the lock, but left the video
+unsynchronised: audio was about half a second off for every P7 MKV with audio. Those versions also had a rare
+timing bug. The kernel's tick counter wraps to zero 300 seconds after power-on, and an MKV started with audio in
+the 5 seconds after that could still hard-lock. Both are fixed in v1.2.0.
 
 ### 6. Stopping a film leaves garbage on screen until reboot
 
@@ -281,10 +287,25 @@ been freed and reused.
 **Fix:** when the EL decoder is stopped and its plane is still on, the hook turns the plane off with the firmware's
 own function, exactly as the natural-end path does. A seek does not stop the decoder, so seeking is unaffected.
 
+### 7. Green strips after fast-forward or seeking
+
+**Symptom:** after fast-forwarding (or several quick seeks) in a P7 MKV, playback froze and stopped. From then on
+every P7 file showed green strips in parts of the picture until the player was rebooted. Single-layer files were
+not affected.
+
+**Cause:** after a seek or trick-play restart, the EL decoder can start reading at a base-layer access unit, where
+it finds the **base layer's** 3840×2160 SPS (same SPS id as its own 1920×1080 one). It then decoded EL pictures
+with 4K dimensions into 1080p frame buffers, writing past their end into neighbouring memory. On stock firmware
+the EL never displays, so this was invisible.
+
+**Fix:** two kernel hooks, in the SPS parser call and in the pre-parse that sizes the frame buffers. In
+single-stream DV mode they reject any SPS wider than 1920 on the EL decoder, and its own SPS follows a moment
+later.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
-Vision TV in **TV-led** mode. Audio was AC-3 5.1 bitstreamed to the receiver.
+Vision TV in **TV-led** mode. Audio was AC-3 5.1 or Dolby TrueHD Atmos, bitstreamed to the receiver.
 
 The main test material was a **90-second Dolby Vision profile 7 FEL excerpt cut from a commercial UHD release**:
 3840×2160, 23.976 fps, CM v2.9, 8 slices per picture, AC-3 5.1. Every other test file was derived from it with
@@ -333,6 +354,17 @@ This is why the fix rewrites the original stream inside the player instead of as
 
 Counters from a full 90-second run: 2,180 enhancement-layer pictures fixed, 15,260 slices rewritten, about 2,170
 FIFO releases clamped, 0 decode errors, 0 time-outs.
+
+### Audio formats, trick play and lip sync (v1.2.0)
+
+| Test | Result |
+|---|---|
+| Same P7 FEL clip with **Dolby TrueHD Atmos** as the only audio | ✅ Dolby Vision + Atmos on the receiver (raw HBR passthrough) |
+| Fast-forward until the end, then play again | ✅ no freeze, no strips (before fix 7: freeze, then green strips until reboot) |
+| Several quick seeks, including past the end | ✅ |
+| Lip sync, P7 MKV with audio, from the start and after resume | ✅ correct (v1.0/v1.1: audio about 0.5 s off) |
+| MKV started with audio exactly 297–312 s after power-on (tick counter wrap) | ✅ no lock (v1.0/v1.1: could hard-lock) |
+| P7 single-stream TS with audio, P5 MKV, P8.1 MKV | ✅ unchanged |
 
 ### Final regression run (persistent install, fresh boot)
 
@@ -394,6 +426,14 @@ each blob is printed. No firmware files are needed or included.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
 
 ## Changelog
+
+- **v1.2.0: recommended update for everyone on v1.0/v1.1.**
+  - Lip sync: the AV-sync controller now goes to the base-layer plane, so P7 MKV audio is in sync. It was about
+    0.5 s off.
+  - Fixed a rare hard lock when an MKV with audio was started 300–305 s after power-on (tick counter wrap).
+  - Fixed freezes and lasting green strips after fast-forward or seeking in P7 MKVs (EL decoder reading the base
+    layer's SPS).
+  - Tested with Dolby TrueHD Atmos.
 
 - **v1.1.0:** **better subtitles** (anti-aliased, outline width 2 with black, grey colours for HDR/DV, menu squares
   to match), on the RU 65-0131 player program. Wider compatibility for the Dolby Vision fix: The installer no longer requires the region-specific player program to be the

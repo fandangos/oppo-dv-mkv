@@ -19,23 +19,30 @@ rd_entry:                                   @ i4ESM_FifoRdPtrSet entry (r0 handl
     b rd_cont
     .ltorg
     .global sync_stub
-sync_stub:                                  @ u4VDP_AssignSyncCtrl 0x7e9c0c48 (replaces a debug-print bl); r4 = VDP, r5 = query result
-    ldrb r1, [r4]                           @ VDP id
-    ldr r2, =elstat+216                     @ jiffies of the last VDP0 SyncCtrl assignment
+sync_stub:                                  @ u4VDP_AssignSyncCtrl 0x7e9c0c48 (replaces a debug-print bl); r4 = VDP, r5 = query
+    ldrb r1, [r4]                           @ result, r7 = the plane's previous SyncCtrl. VDP objects: VDP0 = VDP1 - 0x880
+    ldr r2, =elstat+80                      @ [r2] = VDP0 seen flag (field blrd), [r2+8] = its jiffies (field blcalls)
     ldr r3, =jiffies
     ldr r3, [r3]
     cmp r1, #0
-    streq r3, [r2]
+    streq r3, [r2, #8]
+    moveq r0, #1
+    streq r0, [r2]
     bxeq lr
     cmp r1, #1
     bxne lr
     cmp r5, #0
     bxne lr
-    ldr r0, [r2]
+    ldr r0, [r2]                            @ TS / Blu-ray: VDP0 got a SyncCtrl in the last 5 s -> stock behaviour
+    cmp r0, #0                              @ (a flag, not a 0 timestamp: jiffies wraps to 0 at 300 s uptime)
+    beq 1f
+    ldr r0, [r2, #8]
     sub r0, r3, r0
-    cmp r0, #500                            @ VDP0 not assigned in the last 5 s (MKV path): keep VDP1 off SyncCtrl
-    orrhs r5, r5, #1                        @ (EL plane slaved to audio sync without the BL plane hard-locks the SoC)
-    bx lr
+    cmp r0, #500
+    bxlo lr
+1:  sub r4, r4, #0x880                      @ MKV path offers the AV-sync controller to the EL plane only, which hard-locks
+    ldr r7, [r4, #0x6c8]                    @ the SoC with audio; give it to the base-layer plane VDP0 instead (the rest of
+    bx lr                                   @ the function assigns it to [r4]) -> AV sync like single-layer MKV
     .ltorg
     .global vdp_entry
 vdp_entry:                                  @ VDec_Stop entry (r0 esid)
@@ -49,8 +56,6 @@ vdp_entry:                                  @ VDec_Stop entry (r0 esid)
 elstat:
     .word 0x454c4658, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     .word 0, 0, 0, 0, 0, 0, 0, 100
-    .space 128
     .word 0, 0, 0, 0
     .word 0, 0, 0, 0
-    .space 128
     .word 0, 0

@@ -2,7 +2,7 @@
  * Oppo UDP-203, MediaTek MT8581, "RU 65-0131" jailbreak firmware. Linked into the dead CLI test function
  * _FbmCli_Test_4K (0x7e98be80..0x7e98c7c0) of the bdpdrv1 module (always loaded at 0x7e8d3000 on this firmware).
  *
- * Four hooks (see entry.S and docs/TECHNICAL.md):
+ * Six hooks (see entry.S and docs/TECHNICAL.md):
  *  1. elfix()   i4VDEC_HAL_H265_InitBarrelShifter: in MKV/TS single-stream P7 the enhancement layer (EL) NALs are
  *               wrapped in NAL type 63 (00 00 01 7E 01 ...). The decoder's software start-code reader strips that
  *               wrapper, but the hardware slice finder of the EL decoder cannot: every 2nd..Nth slice of an EL
@@ -15,9 +15,13 @@
  *               clamped to the BL's read pointer.
  *  3. sync_stub u4VDP_AssignSyncCtrl (entry.S): the MKV path gives the EL video plane (VDP1) an AV-sync controller but
  *               never the BL plane (VDP0); with audio as master this hard-locks the SoC when the EL plane starts.
- *               VDP1 is refused a sync controller unless VDP0 got one in the last 5 s (TS / Blu-ray keep stock flow).
+ *               Unless VDP0 got one in the last 5 s (TS / Blu-ray keep stock flow), it is redirected to VDP0
+ *               (lip sync like single-layer MKV).
  *  4. vdp_off() VDec_Stop: on STOP the MKV middleware never turns the EL plane off, which then scans out freed frame
  *               buffers (garbage on every screen until reboot). When the EL decoder stops, the plane is disabled.
+ *  5. spsfix()  i4VDecH265SPSPsr call and
+ *  6. ppfix()   vH265PreParseSPS call: after a seek / fast-forward the EL decoder can parse the BL's 4K SPS and decode
+ *               EL pictures past the end of its 1080p buffers (green strips until reboot); such an SPS is rejected.
  *
  * Some struct fields below are left over from development; the layout is kept so the counters stay where the
  * installer's "status" output expects them. */
@@ -28,9 +32,9 @@ extern int printk(const char *fmt, ...);
 extern volatile u32 jiffies;
 
 struct st { u32 magic, calls, elaus, fixes, maxscan, lastrd, enable, bad, longs, longrd, longwhy, zstop;
-            u32 laecalls, elcalls, waits, timeouts, laerd, sleepmax, skipped, maxwait; u32 tr[8][4];
+            u32 laecalls, elcalls, waits, timeouts, laerd, sleepmax, skipped, maxwait;
             u32 blrd, prevel, blcalls, gated;
-            u32 rdcalls, rdfixed, rdtick, rdlag; u32 sl[8][4]; u32 esa, eea; };
+            u32 rdcalls, rdfixed, rdtick, rdlag; u32 esa, eea; };
 extern struct st elstat;
 
 #define LIMIT (3u << 20)
@@ -108,7 +112,6 @@ void elfix(u32 *bs, u32 vld, u32 lr)
     u32 len = scan(b, n, p, 0, sa, &el, &fx, &why, lim);
     if (why) { s->longs++; s->longrd = rd; s->longwhy = why; }
     if (len > s->maxscan) s->maxscan = len;
-    if (en & 64) printk("<7>ELH v%u %x rd%x el%u fx%u w%u %u\n", vld, lr & 0xffff, rd - sa, el, fx, why, len);
     if (!el || why) return;                      /* BL / other, or EL AU not complete */
     s->prevel = p; s->gated = len;               /* remember this EL AU */
     if (!fx) return;                             /* already rewritten */
@@ -165,8 +168,40 @@ void vdp_off(u32 esid)
 {
     struct st *s = &elstat;
     u32 arr = VDP_G[0x34 / 4];
-    if (s->enable & 64) printk("<7>VDS %u %u\n", esid, arr ? *(volatile u32 *)(arr + 0x880 + 0x118) : 9);
     if (!(s->enable & 1024) || esid != 1 || !arr || *(volatile u32 *)(arr + 0x880 + 0x118) != 2) return;
     s->waits++;
     VDP_SetEnable(1, 0);
+}
+
+/* i4VDecH265SPSPsr(ctx, sps_base, pic) call in i4H265_Parse_Syntax_Proc. After a seek in single-stream DV the EL
+ * decoder (ESID 1) can start at a base-layer access unit and parse the BL's 3840x2160 SPS (same sps id as the EL's).
+ * It then builds a 4K frame-buffer group, borrowing memory that the previous EL group still holds; after a few rapid
+ * seeks the EL buffers overlap other memory (green strips in the EL picture until reboot). An SPS wider than 1920
+ * on the EL decoder in single-stream DV mode is therefore rejected like a malformed one; the EL's own SPS follows. */
+extern u32 i4VDecH265SPSPsr(u32 ctx, u32 base, u32 pic);
+#define ESINFO(i) (*(volatile u32 *)(0x7ee6e690u + 0xa8 + (i) * 4))
+u32 spsfix(u32 ctx, u32 base, u32 pic)
+{
+    u32 r = i4VDecH265SPSPsr(ctx, base, pic), e;
+    if (r || !(elstat.enable & 2048) || *(u8 *)(ctx + 0xd4) != 1 || !(e = ESINFO(1))) return r;
+    if (*(u8 *)(e + 0x650ac) != 1 || *(u8 *)(e + 0x650af) != 1) return r;   /* not single-stream DV EL */
+    u8 *sps = (u8 *)(base + *(u32 *)(base + 0x30) * 0x28a8);
+    if (*(u32 *)(sps + 0x450) <= 1920) return r;
+    sps[0x2b4] = 0;                                     /* SPS not valid */
+    elstat.timeouts++;
+    return 0xff03;
+}
+
+/* Same problem in the pre-parse that sizes the frame buffers when a decoder (re)starts after a seek or trick play:
+ * vH265PreParseSPS(esid, .., .., .., out) with out = {w, h, x, valid} and the previous values saved at out[4..7].
+ * For the EL decoder in single-stream DV a size wider than 1920 (the BL's SPS) is dropped: previous values back. */
+extern void vH265PreParseSPS(u32 esid, u32 a, u32 b, u32 c, u32 *o);
+void ppfix(u32 esid, u32 a, u32 b, u32 c, u32 *o)
+{
+    u32 e;
+    vH265PreParseSPS(esid, a, b, c, o);
+    if (esid != 1 || !(elstat.enable & 2048) || !(e = ESINFO(1)) || o[0] <= 1920) return;
+    if (*(u8 *)(e + 0x650ac) != 1 || *(u8 *)(e + 0x650af) != 1) return;
+    o[0] = o[4]; o[1] = o[5]; o[2] = o[6]; ((u8 *)o)[12] = ((u8 *)o)[28];
+    elstat.timeouts++;
 }
