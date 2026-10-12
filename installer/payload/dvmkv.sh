@@ -12,4 +12,5 @@ done
 log "player pid $P"
 sh $D/dvhook.sh on 2>&1 | while read l; do log "dvhook: $l"; done   # MKV Dolby Vision signalling (liblp)
 sh $D/p7kel.sh on 2>&1 | while read l; do log "p7kel: $l"; done     # profile 7 decoder fixes (kernel)
+[ -f $D/subs.sh ] && sh $D/subs.sh 2>&1 | while read l; do log "subs: $l"; done   # improved subtitles
 sleep 90; [ -d /proc/$P ] && { rm -f $D/bootcount; sync; log "boot marked healthy"; }

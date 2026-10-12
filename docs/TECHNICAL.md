@@ -1,10 +1,11 @@
 # Technical notes
 
 This document is for people who want to understand, verify or extend the patches. All addresses are for the Oppo
-UDP-203 with the **RU 65-0131** jailbreak firmware:
-- `liblp.so` md5 `e39b358c5b0948933f49fd3099f81114`
-- `bdpprog.1` md5 `49b649bdcffe8b611f1b7bbc0d9fa0b1`
-- `bdpdrv1` kernel module loaded at `0x7e8d3000`
+UDP-203 on Oppo's v65 firmware (developed and tested on the **RU 65-0131** jailbreak):
+- `liblp.so` md5 `e39b358c5b0948933f49fd3099f81114` (identical in all regional v65 firmwares)
+- `bdpdrv1` kernel module loaded at `0x7e8d3000`, verified by fingerprint (see below)
+- the region-specific player program (`bdpprog.1`, md5 `49b649bdcffe8b611f1b7bbc0d9fa0b1` on RU 65-0131) is not
+  patched
 
 The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 
@@ -66,6 +67,23 @@ Pitfalls:
 - VDP0 is the main (BL) video plane and VDP1 the second plane, used for the DV EL. The plane state is at
   `*(0x7ee3cb60 + 0x34) + id*0x880 + 0x118`; 2 means shown.
 - `u4VDP_AssignSyncCtrl` assigns the AV-sync controller per plane. MKV with audio assigns it to VDP1 only.
+
+### Driver fingerprint
+
+`p7kel.sh check` (also run by the installer) reads these words through `/dev/mem` and refuses on any mismatch:
+
+| Address | Expected | What |
+|---|---|---|
+| `0x7ea9c7b8`, `0x7e9fa2e0`, `0x7eaac9a0`, `0x7e9c0c4c` | original code | instruction after each hook point |
+| `0x7e9a3f40` | `020050e3` | `VDP_SetEnable` entry |
+| `0x7eb5bc94` | `70402de9` | `DOVI_CleanDCacheRange` entry |
+| `0x7e9fa3ac` | `0x7ee41cac` | literal: ESM handle table |
+| `0x7eabd2cc` | `0x7ee6e690` | literal: VDEC instance table |
+| `0x7e9a41ec` | `0x7ee3cb60` | literal: VDP global state |
+
+It also checks:
+- `/proc/kallsyms`: `printk` at `0x803f7df0` and `jiffies` at `0x805760c0`;
+- the original or patched instruction at each of the 4 hook sites.
 
 ### Code cave and hooks
 
@@ -140,6 +158,34 @@ lets the EL frame buffers be released, which is what the natural end-of-file pat
 | 6 | enable |
 
 The VDP0 sync timestamp, the clamp counters and the stop counter live further in the struct (see `elfix.c`).
+
+## Part 3: subtitles (`subs.sh`, RU 65-0131 player program only)
+
+It is gated on the md5s of `bdpprog.1` (`49b649bd…`) and `liblp.so`. It writes into the running player through
+`/proc/<pid>/mem`.
+
+| What | Where | Change |
+|---|---|---|
+| Rendered text colour table (ARGB, 24 entries = the menu grid) | bdpprog `.data` `0x01238c20` | slots 9, 11 → `A0A0A0`, `686868`; slots 18–23 → `C8`, `B4`, `A0`, `88`, `68`, `48` grey |
+| Palette mirror (RGBA, entries 10..33) | liblp `0x6aa790` + runtime base | same values |
+| Glyph render flags | bdpprog `0x4cbfdc` (ARM) | `movw r2,#0x1004` (RENDER\|MONOCHROME) → `mov r2,#6` (RENDER\|NO_HINTING) |
+| Outline colour row | bdpprog `0x8da2a4` (Thumb) | `adds r3,#0x1c` → `#0x1d` (options = palette 29..34, last = black) |
+| Outline preview colours | bdpprog `0x1238c80` | `B4`, `A0`, `88`, `68`, `48`, `000000` |
+| Outline (edge) width | liblp `0x584998` (5 instructions) + `0x584ad8` | 1 → 2 |
+
+Every instruction patch checks the expected original bytes first.
+
+**Menu squares:** `image_bdp83.bin` is a container with a 282-entry index (`u16 w, u16 h, u32, u32, u32 size,
+u32 offset`, 20 bytes each, after a `u32` count). Entries 216..239 are the 56×30 subtitle-colour squares. The
+installer:
+1. copies the player's own `/mnt/rootfs_normal/res/image_bdp83.bin` (md5 `463cec55…`, identical in every regional
+   v65 firmware);
+2. writes the 8 shipped squares over entries 225, 227 and 234–239, zero-fills the rest of each old square and
+   updates the size fields;
+3. accepts the result only if its md5 is `44bedb87…`.
+
+At boot the wrapper replaces the `/res` symlink by a directory of symlinks and points `image_bdp83.bin` at the rebuilt
+file. This happens in RAM, so the root filesystem is never written.
 
 ## Debugging tips (for developers)
 

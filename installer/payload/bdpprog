@@ -1,13 +1,16 @@
 #!/bin/sh
 # oppo-dv-mkv boot wrapper: /mnt/ubi_boot/bdpprog
 # The jailbreak firmware's launcher (/usr/local/bin/bdpprog) runs this file instead of bdpprog.1 when it exists.
-# It starts the RAM patcher in the background, then runs the real player and hands its exit code back to rc5.
+# It swaps in the rebuilt subtitle-menu image, starts the RAM patcher in the background, then runs the real player
+# and hands its exit code back to rc5.
 # Fail-safes (each one leaves a stock player):
 #  - $D/disable exists                                          -> no patches
 #  - 2 boots in a row never reached "healthy" (dvmkv.sh clears $D/bootcount after 90 s) -> no patches
 #  - player dies abnormally within 120 s of a patched start     -> create $D/disable and reboot
 D=${OPPODV_D:-/mnt/ubi_boot/oppo-dv-mkv}
 PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
+# Replacement resources name:md5 - each swapped into /res only if its md5 matches (RAM only: /res is rebuilt at boot)
+RES="image_bdp83.bin:44bedb87bacfc5217ec22cffd2b18295"
 MODS=0
 if [ ! -e $D/disable ]; then
   N=$(cat $D/bootcount 2>/dev/null); N=${N:-0}
@@ -17,6 +20,16 @@ if [ ! -e $D/disable ]; then
   else
     echo $((N+1)) > $D/bootcount; sync
     MODS=1
+    if [ -L /res ] && [ -z "$OPPODV_D" ]; then    # /res -> rootfs: replace by a directory of symlinks
+      rm /res && mkdir /res && ln -s /mnt/rootfs_normal/res/* /res/ \
+        || { rm -rf /res; ln -s /mnt/rootfs_normal/res /res; }
+    fi
+    if [ -d /res ] && [ ! -L /res ] && [ -z "$OPPODV_D" ]; then
+      for r in $RES; do
+        f=${r%%:*}; m=${r#*:}
+        [ "$(md5sum $D/$f 2>/dev/null | cut -d' ' -f1)" = "$m" ] && ln -sf $D/$f /res/$f
+      done
+    fi
     [ -f $D/dvmkv.sh ] && sh $D/dvmkv.sh > $D/dvmkv.log 2>&1 &
   fi
 fi

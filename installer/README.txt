@@ -1,11 +1,15 @@
-oppo-dv-mkv - Dolby Vision (profile 5, 7 FEL/MEL, 8) from MKV for the Oppo UDP-203 (RU 65-0131 jailbreak firmware)
+oppo-dv-mkv - Dolby Vision (profile 5, 7 FEL/MEL, 8) from MKV for the jailbroken Oppo UDP-203
 https://github.com/fandangos/oppo-dv-mkv
+
+Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) on the RU 65-0131 player.
 
 !!! USE AT YOUR OWN RISK. This modifies how your player boots. The author(s) accept NO responsibility for
 !!! any damage, bricked players, lost warranty or anything else. Read the full README on GitHub first.
 
 REQUIREMENTS
-  - Oppo UDP-203 running the free "RU 65-0131" jailbreak firmware (the installer checks this and refuses otherwise).
+  - Oppo UDP-203 with a jailbreak built on Oppo's v65 firmware. Tested: the free "RU 65-0131" jailbreak.
+    Others: untested; the installer checks the firmware and refuses (changing nothing) if it does not match.
+    To check a player WITHOUT installing, use the oppo-dv-mkv-*-check.zip release the same way.
   - A FAT32 USB stick. No other USB storage plugged in while installing.
   - Display set to TV-led Dolby Vision (all testing was done in TV-led mode, NOT player-led / low latency).
 

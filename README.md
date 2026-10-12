@@ -4,6 +4,9 @@
 single track) play as real Dolby Vision, with audio, from MKV files. The original files play as they are, with no
 remuxing or conversion.
 
+**Plus better subtitles:** anti-aliased text instead of jagged 1-bit glyphs, a thicker outline with a real black
+option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby Vision.
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -34,7 +37,9 @@ remuxing or conversion.
 
 ## Contents
 - [What it does](#what-it-does)
+- [Better subtitles](#better-subtitles)
 - [Requirements](#requirements)
+- [Compatibility](#compatibility)
 - [Install](#install)
 - [Uninstall and emergency off switch](#uninstall-and-emergency-off-switch)
 - [Known limitations](#known-limitations)
@@ -44,6 +49,7 @@ remuxing or conversion.
 - [How it is installed on the player](#how-it-is-installed-on-the-player)
 - [Building from source](#building-from-source)
 - [Credits](#credits)
+- [Changelog](#changelog)
 
 ## What it does
 
@@ -64,17 +70,70 @@ With this fix installed:
 Audio (tested with AC-3 bitstreamed to an AV receiver), pause and resume, seeking, stopping and playing the next
 file all work. Discs and TS files keep working as before.
 
+## Better subtitles
+
+The stock subtitle renderer draws 1-bit monochrome glyphs, which gives jagged edges and colour fringing around the
+letters. Its colour choices are all full-brightness, which is glaring on HDR and Dolby Vision. The installer also
+improves this, at every boot and in RAM only:
+
+| | Stock | With oppo-dv-mkv |
+|---|---|---|
+| Glyph rendering | 1-bit monochrome, hinted (jagged, fringing) | **anti-aliased**, unhinted (smooth edges) |
+| Outline (edge) width | 1 | **2** |
+| Outline colours | no black | last option is **black** |
+| Text colours | bright colours only | in the 6×4 colour grid, the 4th and 6th squares of row 2 and the **whole 4th row** become **greys** (row 4: C8, B4, A0, 88, 68, 48) for dimmer text on HDR/DV |
+| Subtitle colour menu | — | the colour squares show the new colours |
+
+Pick the colours in the player's subtitle settings as usual. These changes were tested on the development player
+(the same RU 65-0131 jailbreak) together with the Dolby Vision fix. The subtitle part needs the RU 65-0131 player program,
+the region-specific part of the firmware. On any other jailbreak the installer skips it automatically, and the Dolby
+Vision fix is unaffected. The menu colour squares are rebuilt **on the player** from its own image file plus 8 small
+colour squares that ship with this project; no firmware file is distributed.
+
 ## Requirements
 
 - An **Oppo UDP-203**.
-- Running the free **"RU 65-0131" jailbreak firmware**. The installer checks this exactly: the md5 of `liblp.so`
-  must be `e39b358c5b0948933f49fd3099f81114` and that of `bdpprog.1` must be `49b649bdcffe8b611f1b7bbc0d9fa0b1`,
-  the launcher must support `/mnt/ubi_boot/bdpprog`, and the `bdpdrv1` kernel module must be at its expected
-  address. **On any other firmware it refuses to install and changes nothing.**
-  - The UDP-205 and other firmware versions are **not supported**, because the patches are tied to exact binary
-    addresses.
+- A **jailbreak firmware built on Oppo's v65 firmware** that starts `/mnt/ubi_boot/bdpprog` at boot. The free
+  **"RU 65-0131" jailbreak is the only one that was actually tested.** See [Compatibility](#compatibility) for
+  other jailbreaks and regions, and how to check yours without installing anything.
 - A USB stick formatted **FAT32**.
 - A Dolby Vision display, set up for **TV-led** Dolby Vision (see above).
+
+## Compatibility
+
+The patches modify two pieces of Oppo's firmware:
+- the playback library `liblp.so`;
+- the `bdpdrv1` video driver (a kernel module).
+
+They do not touch the region-specific player program, the part that differs between regions and between jailbreaks.
+
+- **`liblp.so` is byte-identical in all seven regional v65 firmwares** (default/US, EU, AU, CN, JP, RU, TW). The
+  installer requires its md5 to be `e39b358c5b0948933f49fd3099f81114`.
+- **The `bdpdrv1` video driver is verified in memory** before anything is written. The installer and the patcher
+  check:
+  - its load address;
+  - the original instruction at every hook point and at the instruction after it;
+  - the entry of every driver function the patch calls;
+  - the pointers to every driver table the patch reads;
+  - the kernel symbols it uses.
+
+  A different driver fails these checks.
+- **The jailbreak must start `/mnt/ubi_boot/bdpprog` at boot.** The installer never overwrites a
+  `/mnt/ubi_boot/bdpprog` that belongs to another mod, and if another mod already patched the same places, the
+  patcher sees unexpected bytes and does nothing.
+
+| Firmware | Status |
+|---|---|
+| RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles) |
+| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes; **untested**, at your own risk. Subtitle improvements are skipped |
+| Any other firmware version (for example v60), stock firmware, UDP-205 | not supported: the installer refuses |
+
+### Checking a player without installing anything
+
+Use `oppo-dv-mkv-vX.Y.Z-check.zip` exactly like the installer (see [Install](#install)). It **changes nothing**:
+it only writes a report to `oppo-dv-mkv.log` on the stick, ending with `VERDICT: COMPATIBLE` or
+`VERDICT: NOT COMPATIBLE` and the reason. If you try a jailbreak other than RU 65-0131, please share the report
+(it contains md5s and kernel information, no personal data) by opening an issue.
 
 ## Install
 
@@ -122,8 +181,8 @@ The installer also works as an updater: running a newer release the same way rep
   Vision capability from your TV/receiver chain at boot (the HDMI EDID handshake). This happens sometimes after a
   power cycle when the TV or receiver was not ready. Turn the TV (or the receiver) off and on again. In this state
   playback can also stall at start-up; the fix is the same.
-- **MKV DV stopped working after a firmware update.** The patches only apply to the exact firmware above, so the
-  patcher logs a mismatch and does nothing.
+- **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
+  the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON` and
   `boot marked healthy`.
 
@@ -303,11 +362,14 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/bdpprog                 boot wrapper with the fail-safes; starts the patcher, then the real player
 /mnt/ubi_boot/oppo-dv-mkv/dvmkv.sh    waits for the player, applies both patches, marks the boot healthy
 /mnt/ubi_boot/oppo-dv-mkv/dvhook.sh   liblp.so patch   (on|off|status)
-/mnt/ubi_boot/oppo-dv-mkv/p7kel.sh    kernel patch     (on|off|status)
+/mnt/ubi_boot/oppo-dv-mkv/p7kel.sh    kernel patch     (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (RU 65-0131 player program only)
+/mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
 ```
 
 Before writing a single byte, both patchers verify every patch site: the exact original instructions must be in
-place, and for the kernel patch the unused code area it occupies must match the original by md5. On any mismatch
+place, and for the kernel patch the driver fingerprint must match and the unused code area it occupies must match
+the original by md5. On any mismatch
 they do nothing. The installer refuses to overwrite an existing `/mnt/ubi_boot/bdpprog` that belongs to another
 mod.
 
@@ -330,6 +392,15 @@ each blob is printed. No firmware files are needed or included.
   [FFmpeg](https://ffmpeg.org/), [tsMuxeR](https://github.com/justdan96/tsMuxer) and
   [Ghidra](https://ghidra-sre.org/), used to make the test files and to analyse the firmware.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
+
+## Changelog
+
+- **v1.1.0:** **better subtitles** (anti-aliased, outline width 2 with black, grey colours for HDR/DV, menu squares
+  to match), on the RU 65-0131 player program. Wider compatibility for the Dolby Vision fix: The installer no longer requires the region-specific player program to be the
+  RU 65-0131 one; it checks the files that are actually patched instead (`liblp.so` md5, plus an in-memory
+  fingerprint of the `bdpdrv1` driver). Added a **check-only** zip that writes a compatibility report and changes
+  nothing. The Dolby Vision patches themselves are unchanged from v1.0.0.
+- **v1.0.0:** first release.
 
 ## License
 
