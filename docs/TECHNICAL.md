@@ -1,0 +1,168 @@
+# Technical notes
+
+This document is for people who want to understand, verify or extend the patches. All addresses are for the Oppo
+UDP-203 with the **RU 65-0131** jailbreak firmware:
+- `liblp.so` md5 `e39b358c5b0948933f49fd3099f81114`
+- `bdpprog.1` md5 `49b649bdcffe8b611f1b7bbc0d9fa0b1`
+- `bdpdrv1` kernel module loaded at `0x7e8d3000`
+
+The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
+
+## Overview
+
+| Part | Target | Patcher | Blob source |
+|---|---|---|---|
+| MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
+| Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
+
+Both patchers are idempotent (`on` when already on does nothing) and reversible (`off`). They verify every patch
+site before writing, and they write the code blob before redirecting any call into it.
+
+## Part 1: liblp.so (MKV signalling)
+
+liblp file offset = runtime offset from the library's load base. (In Ghidra, with the default image base, add
+0x10000.)
+
+- **Code cave:** the zero padding at the end of the RX segment, `0x6cdc00..0x6ce000`. The blob is 904 bytes of Thumb
+  C plus ARM entry shims.
+- **State:** 64 bytes of bss slack at `0x757e00`: parser pointer, have/active flags, profile, level, the 24-byte
+  `dvcC` record, the 0x1c-byte `MPC_DOVI_INFO_T` and a hit counter.
+
+| Hook (patched `bl`) | Site | Original target | Purpose |
+|---|---|---|---|
+| H0 | `0x3c57ec`, `0x3c2ff0` | `CLpMkvParser::mrParseTracks` | forget the previous record at the start of Tracks |
+| H1 | `0x3c00d4` | `CLpMkvParser::mrSkip` (element id in r5) | for `BlockAdditionMapping` (0x41E4): read 0x41E7 (type `dvcC`/`dvvC`) and 0x41ED (record), then restore the reader position and skip as usual |
+| H2 | `0x3d252c` | `CLpMovieMpcWrapper::mrSetMediaInfo` | pass a filled `MPC_DOVI_INFO_T` instead of NULL (dovi, single, BL, EL, RPU) |
+| H3 | `0x3c99a4` | `CLpMovieMpcWrapper::mrSetStreamInfo` | set the video info DV bytes `+0x124..0x129` and profile/level at `+0x12c/+0x12d` |
+
+Accepted streams:
+- profile 5 or 8 with BL + RPU and no EL;
+- profile 7 with BL + EL + RPU (single track).
+
+The HEVC `CodecPrivate` must be longer than 23 bytes, i.e. it must carry parameter-set arrays. Signalling DV for an
+hvcC without VPS/SPS/PPS hard-locks the SoC.
+
+Pitfalls:
+- In `MPC_DOVI_INFO_T`, bytes 8 and 9 are **not** profile/level (they are an ID / VS10 flag) and must stay 0.
+  Profile and level belong only in the video info.
+- Profile 5 needs the correct profile/level; profile 8.1 tolerates 0.
+
+## Part 2: bdpdrv1 (profile 7)
+
+### Firmware facts that matter
+
+- In single-stream DV mode (`DOVI_[1]_SINGLE_[1]_BL_[1]_EL_[1]_RPU_[1]`) the MKV splitter (`splitter.ko`, PSR video
+  filter) or the TS demux writes the interleaved stream into **one** video FIFO and builds two access-unit tables.
+- The VDEC decodes:
+  - **ESID 0** = BL + RPU: 3840×2160, dual-core (VLD0+VLD1) plus a look-ahead engine on ESID 7;
+  - **ESID 1** = EL: 1920×1080 on VLD1.
+- The software start-code reader (`u4VDEC_HAL_H265_GetStartCode_PicStart`) strips the NAL-62/63 wrapper
+  (`(v & 0xfdff) == 0x7c01`). It also skips VCL NALs with `first_slice_segment_in_pic_flag = 0`. The hardware slice
+  finder sees the raw bytes.
+- The ESM (elementary stream manager) handle table is at `0x7ee41cac`. A handle points to a fifo struct
+  `{sa, ea, rd, wr}`. The VDEC's per-ESID handle is at `0x7ee6e690 + 8 + esid*0x14 + 0xc` (from `VDec_Update_Esm`).
+  BL and EL use **different handles and fifo structs over the same memory**.
+- The video FIFO ring is 8 MB, but the barrel-shifter struct passed to the hardware describes a 12 MB window.
+- VDP0 is the main (BL) video plane and VDP1 the second plane, used for the DV EL. The plane state is at
+  `*(0x7ee3cb60 + 0x34) + id*0x880 + 0x118`; 2 means shown.
+- `u4VDP_AssignSyncCtrl` assigns the AV-sync controller per plane. MKV with audio assigns it to VDP1 only.
+
+### Code cave and hooks
+
+The cave is the dead CLI test function `_FbmCli_Test_4K`, `0x7e98be80..0x7e98c7c0`. Code runs up to `0x7e98c648`;
+the counters and state (`elstat`) follow, up to `0x7e98c7c0`. `p7kel.sh` checks the original contents by md5 (three
+chunks: page split and code/data split), so no firmware bytes are shipped.
+
+| Hook | Site | Original instruction | Entry |
+|---|---|---|---|
+| EL slice rewrite | `i4VDEC_HAL_H265_InitBarrelShifter` `0x7ea9c7b4` | `push {r0,r1,r4-r8,lr}` | `entry` → `elfix(bs, vld, lr)` |
+| FIFO clamp | `i4ESM_FifoRdPtrSet` `0x7e9fa2dc` | `ldr r2,[pc,#0xc8]` (literal `0x7ee41cac`) | `rd_entry` → `rdfix(handle, rd)` returns the rd to use |
+| AV-sync guard | `u4VDP_AssignSyncCtrl` `0x7e9c0c48` | `bl` to a debug print (replaced) | `sync_stub` |
+| Stop | `VDec_Stop` `0x7eaac99c` | `cmp r0,#7` | `vdp_entry` → `vdp_off(esid)` |
+
+#### elfix (EL slice rewrite)
+
+It is called for every barrel-shifter init: BL cores, the look-ahead engine and the EL. `bs = {rdptr, fifo_end,
+fifo_start, ...}`, all kernel linear-map addresses.
+
+1. Bound the scan:
+   - ring end = the ESM fifo end recorded by `rdfix` (not the 12 MB window);
+   - length = the distance to the furthest ESM write pointer for this FIFO, so it never reads unwritten data.
+2. Skip the call if `rdptr` lies inside the EL access unit handled last. Every NAL header parse calls this hook.
+3. Scan from `rdptr`. If it is an EL AU (wrapped NALs), count the wrapped VCL NALs with first_slice = 0. Stop at
+   the second first slice, the RPU or the first plain non-slice NAL.
+4. If there are any, rewrite each `01 7E` to `00 00` (giving `00 00 00 00 01`), then
+   `DOVI_CleanDCacheRange(addr, 1)` for both bytes.
+
+#### rdfix (FIFO clamp)
+
+- It records the ESM ring bounds for elfix.
+- If the caller is the EL handle (ESID 1), BL and EL share the FIFO (same `sa`), and the BL's `rd` is behind the
+  EL's (more unread data from `wr`), it returns the BL's `rd`.
+- It never changes the BL's own releases. Holding the BL back to a lagging EL deadlocks TS playback with audio: the
+  FIFO fills, the demux cannot deliver audio, and AV sync never starts.
+
+#### sync_stub (AV-sync guard)
+
+At the replaced debug-print `bl`, r4 holds the VDP object (byte 0 = id) and r5 the query result.
+- For VDP0 it stores `jiffies` (at elstat+216).
+- For VDP1 with a successful query, it forces the "no SyncCtrl interface" path (`r5 |= 1`) unless VDP0 was assigned
+  within the last 500 jiffies (HZ = 100).
+
+#### vdp_off (stop)
+
+On `VDec_Stop(1)`, if VDP1's state is still 2, it calls `VDP_SetEnable(1, 0)`. That disables the composer EL and
+lets the EL frame buffers be released, which is what the natural end-of-file path does.
+
+### Enable flags and counters
+
+`elstat+0x18` holds the enable mask; the release uses `1171`.
+
+| Bit | Meaning |
+|---|---|
+| 1 | scan (elfix active) |
+| 2 | rewrite slices |
+| 16 | legacy (always set) |
+| 64 | debug printk (`<7>ELH ...`, `<7>VDS ...`) |
+| 128 | FIFO clamp |
+| 1024 | stop fix |
+
+`p7kel.sh status` prints the sites state and the first 32 bytes of `elstat`:
+
+| Word | Field |
+|---|---|
+| 0 | magic `XFLE` |
+| 1 | calls |
+| 2 | EL pictures fixed |
+| 3 | slices rewritten |
+| 4 | longest scan |
+| 5 | last rd |
+| 6 | enable |
+
+The VDP0 sync timestamp, the clamp counters and the stop counter live further in the struct (see `elfix.c`).
+
+## Debugging tips (for developers)
+
+- The kernel log goes to `/proc/kmsg`.
+  - `busybox dmesg` only holds a few hundred lines, and the player floods it.
+  - To capture everything up to a hard lock, stream it to a PC:
+    on the player `cat /proc/kmsg | busybox nc -l -p 5556`, and on the PC `nc <player-ip> 5556 > log`.
+- The stock `dd` segfaults on large reads from `/dev/mem`. Single words and small ranges are fine.
+- Useful log lines:
+  - `[VDEC]: [H265-1]: Dec Err` (EL decode error);
+  - `Decode Timeout` (BL);
+  - `[DOVI]HDMI EDID inf:e d` (the display supports DV) versus `inf:0 0` (failed EDID read: no DV output);
+  - `SDR -> DOVI` (DV output started);
+  - `[VDP1] Dovi VDP2 Disable and disable Composer EL` (EL plane off).
+
+## Offline alternative
+
+`docs/unwraprest.py` makes the equivalent change offline on a raw HEVC elementary stream (it drops the 2-byte wrapper from every continuation slice instead of zeroing it in place):
+
+```
+python3 unwraprest.py in.hevc out.hevc
+```
+
+A single-stream P7 TS with a DOVI descriptor, built from the output, plays as FEL Dolby Vision on **stock** firmware.
+It does not help with MKV, because the MKV splitter then puts the unwrapped EL slices into the base layer. It is
+kept for reference only.

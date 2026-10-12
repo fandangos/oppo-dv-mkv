@@ -1,0 +1,35 @@
+#!/bin/sh
+# oppo-dv-mkv boot wrapper: /mnt/ubi_boot/bdpprog
+# The jailbreak firmware's launcher (/usr/local/bin/bdpprog) runs this file instead of bdpprog.1 when it exists.
+# It starts the RAM patcher in the background, then runs the real player and hands its exit code back to rc5.
+# Fail-safes (each one leaves a stock player):
+#  - $D/disable exists                                          -> no patches
+#  - 2 boots in a row never reached "healthy" (dvmkv.sh clears $D/bootcount after 90 s) -> no patches
+#  - player dies abnormally within 120 s of a patched start     -> create $D/disable and reboot
+D=${OPPODV_D:-/mnt/ubi_boot/oppo-dv-mkv}
+PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
+MODS=0
+if [ ! -e $D/disable ]; then
+  N=$(cat $D/bootcount 2>/dev/null); N=${N:-0}
+  case "$N" in *[!0-9]*) N=9;; esac
+  if [ "$N" -ge 2 ]; then
+    echo "boot $(date) bootcount=$N -> patches skipped" >> $D/wrapper.log
+  else
+    echo $((N+1)) > $D/bootcount; sync
+    MODS=1
+    [ -f $D/dvmkv.sh ] && sh $D/dvmkv.sh > $D/dvmkv.log 2>&1 &
+  fi
+fi
+T0=$(cut -d. -f1 /proc/uptime)
+$PLAYER "$@"
+RC=$?
+T1=$(cut -d. -f1 /proc/uptime)
+case "$RC" in
+  0|2|3|4|5|6|7|9|11) ;;
+  *) if [ $MODS = 1 ] && [ $((T1-T0)) -lt 120 ]; then
+       touch $D/disable
+       echo "boot $(date) player rc=$RC after $((T1-T0))s -> patches disabled, rebooting" >> $D/wrapper.log
+       sync; exit 6
+     fi;;
+esac
+exit $RC
