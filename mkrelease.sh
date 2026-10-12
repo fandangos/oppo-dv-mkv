@@ -26,5 +26,7 @@ mk(){  # $1 = zip name, $2 = flag file (UNINSTALL / CHECKONLY) or empty
 mk oppo-dv-mkv-$V.zip
 mk oppo-dv-mkv-$V-uninstall.zip UNINSTALL
 mk oppo-dv-mkv-$V-check.zip CHECKONLY
+T=dist/stage; rm -rf $T; mkdir -p $T; cp -r installer/dump/AutoScript installer/dump/README.txt $T/   # read-only driver dump
+(cd $T && zip -qrX ../oppo-dv-mkv-driver-dump.zip .); rm -rf $T
 (cd dist && sha256sum *.zip > SHA256SUMS)
 ls -l dist; cat dist/SHA256SUMS

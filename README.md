@@ -117,7 +117,9 @@ They do not touch the region-specific player program, the part that differs betw
   - the pointers to every driver table the patch reads;
   - the kernel symbols it uses.
 
-  A different driver fails these checks.
+  A different driver fails these checks. Unlike `liblp.so`, the driver comes from a region-specific, encrypted part of
+  the firmware, and **at least the USA build differs**: a USA-region player reported `module fingerprint mismatch`
+  (the driver is 144 bytes larger and its global data sits 0x90 bytes further on).
 - **The jailbreak must start `/mnt/ubi_boot/bdpprog` at boot.** The installer never overwrites a
   `/mnt/ubi_boot/bdpprog` that belongs to another mod, and if another mod already patched the same places, the
   patcher sees unexpected bytes and does nothing.
@@ -125,6 +127,7 @@ They do not touch the region-specific player program, the part that differs betw
 | Firmware | Status |
 |---|---|
 | RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles) |
+| USA-region player (v65) | **not compatible yet**: different `bdpdrv1` driver build, the installer refuses. Port in progress, see [driver dump](#helping-to-support-another-firmware-driver-dump) |
 | Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes; **untested**, at your own risk. Subtitle improvements are skipped |
 | Any other firmware version (for example v60), stock firmware, UDP-205 | not supported: the installer refuses |
 
@@ -134,6 +137,23 @@ Use `oppo-dv-mkv-vX.Y.Z-check.zip` exactly like the installer (see [Install](#in
 it only writes a report to `oppo-dv-mkv.log` on the stick, ending with `VERDICT: COMPATIBLE` or
 `VERDICT: NOT COMPATIBLE` and the reason. If you try a jailbreak other than RU 65-0131, please share the report
 (it contains md5s and kernel information, no personal data) by opening an issue.
+
+### Helping to support another firmware (driver dump)
+
+If the check fails with `module fingerprint mismatch`, the patch has to be ported to your driver build. Porting needs a
+copy of that driver. `oppo-dv-mkv-driver-dump.zip` (on the release page) makes one. It is **read-only**: it copies the
+loaded `bdpdrv1` driver from memory to the stick, plus a short `info.txt` (kernel and firmware versions, md5s of the
+player program and `liblp.so`, the loaded modules), and writes nothing to the player.
+
+1. Copy the contents of the zip to the root of a FAT32 stick with at least 20 MB free.
+2. Power the player off, plug the stick into the rear USB port, power it on.
+3. Wait 5 minutes after the home menu appears (the copy takes about 30 seconds and runs in the background), then
+   power off and remove the stick.
+4. `oppo-dv-mkv-dump.log` on the stick must end with a line starting with `DONE`.
+5. Delete the `AutoScript` folder from the stick, so the dump does not run again at every boot.
+
+The dump is Oppo's own driver code: **do not post it publicly**. Open an issue saying you have one, and share it
+privately.
 
 ## Install
 
