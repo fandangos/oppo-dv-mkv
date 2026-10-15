@@ -7,15 +7,16 @@ V=${1:-$(cat VERSION)}
 src/kernel/build.sh; src/liblp/build.sh
 python3 src/kernel/mkkinst.py; python3 src/liblp/mkinstall.py
 rm -rf dist; mkdir -p dist
-mk(){  # $1 = zip name, $2 = flag file (UNINSTALL / CHECKONLY) or empty
-  T=dist/stage; rm -rf $T; mkdir -p $T/AutoScript/oppo-dv-mkv
+mk(){  # $1 = zip name, $2 = parts (dv, subs, or both), $3 = flag file (UNINSTALL / CHECKONLY) or empty
+  T=dist/stage; P=$T/AutoScript/oppo-dv-mkv; rm -rf $T; mkdir -p $P
   cp installer/AutoScript/AutoScript.TSS $T/AutoScript/
   sed "s/@VERSION@/$V/" installer/AutoScript/install.sh > $T/AutoScript/install.sh
-  cp installer/payload/bdpprog installer/payload/dvmkv.sh src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh \
-     src/subtitles/subs.sh $T/AutoScript/oppo-dv-mkv/
-  for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $T/AutoScript/oppo-dv-mkv/sq$q.png; done
-  (cd $T/AutoScript/oppo-dv-mkv && md5sum bdpprog dvmkv.sh dvhook.sh p7kel.sh subs.sh sq*.png > MD5SUMS)
-  case "$2" in
+  cp installer/payload/bdpprog installer/payload/dvmkv.sh $P/
+  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh $P/;; esac
+  case "$2" in *subs*) cp src/subtitles/subs.sh $P/
+    for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $P/sq$q.png; done;; esac
+  (cd $P && md5sum * > MD5SUMS)
+  case "$3" in
     UNINSTALL) echo "Presence of this file makes install.sh UNINSTALL oppo-dv-mkv." > $T/AutoScript/UNINSTALL;;
     CHECKONLY) echo "Presence of this file makes install.sh only write a compatibility report (no changes)." > $T/AutoScript/CHECKONLY;;
   esac
@@ -23,9 +24,11 @@ mk(){  # $1 = zip name, $2 = flag file (UNINSTALL / CHECKONLY) or empty
   (cd $T && zip -qrX ../$1 .)
   rm -rf $T
 }
-mk oppo-dv-mkv-$V.zip
-mk oppo-dv-mkv-$V-uninstall.zip UNINSTALL
-mk oppo-dv-mkv-$V-check.zip CHECKONLY
+mk oppo-dv-mkv-$V-full.zip "dv subs"          # Dolby Vision MKV fix + better subtitles
+mk oppo-dv-mkv-$V-mkv-only.zip dv             # Dolby Vision MKV fix only
+mk oppo-dv-mkv-$V-subtitles-only.zip subs     # better subtitles only
+mk oppo-dv-mkv-$V-uninstall.zip "dv subs" UNINSTALL
+mk oppo-dv-mkv-$V-check.zip "dv subs" CHECKONLY
 T=dist/stage; rm -rf $T; mkdir -p $T; cp -r installer/dump/AutoScript installer/dump/README.txt $T/   # read-only driver dump
 (cd $T && zip -qrX ../oppo-dv-mkv-driver-dump.zip .); rm -rf $T
 (cd dist && sha256sum *.zip > SHA256SUMS)

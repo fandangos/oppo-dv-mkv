@@ -11,14 +11,14 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 BDP_MD5=49b649bdcffe8b611f1b7bbc0d9fa0b1; LIB_MD5=e39b358c5b0948933f49fd3099f81114
 PATCH="9:a0a0a0 11:686868 18:c8c8c8 19:b4b4b4 20:a0a0a0 21:888888 22:686868 23:484848"
 log(){ echo "$*"; }
-[ "$(md5sum /usr/local/bin/bdpprog.1 | cut -d' ' -f1)" = $BDP_MD5 ] || { log "bdpprog.1 md5 mismatch (not the RU 65-0131 player program), subtitle patches skipped"; exit 1; }
 [ "$(md5sum /usr/local/lib/liblp.so | cut -d' ' -f1)" = $LIB_MD5 ] || { log "liblp.so md5 mismatch, subtitle patches skipped"; exit 1; }
 n=0; while :; do
-  P=$(ps | awk '$4=="bdpprog.1"{print $1; exit}')
+  P=$(ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')
   [ -n "$P" ] && B=$(grep liblp.so /proc/$P/maps | awk '$2=="r-xp"{split($1,a,"-"); print a[1]; exit}')
   [ -n "$B" ] && break
   n=$((n+1)); [ $n -gt 120 ] && { log "player not found"; exit 1; }; sleep 1
 done
+[ "$(md5sum /proc/$P/exe | cut -d' ' -f1)" = $BDP_MD5 ] || { log "running player program is not the RU 65-0131 one, subtitle patches skipped"; exit 1; }
 M=/proc/$P/mem; L=$((0x$B + 0x6aa790))
 for e in $PATCH; do
   i=${e%%:*}; c=${e#*:}; r=${c%????}; g=${c#??}; g=${g%??}; b=${c#????}

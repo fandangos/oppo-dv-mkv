@@ -26,7 +26,7 @@ out = f'''#!/bin/sh
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 LIB_MD5=e39b358c5b0948933f49fd3099f81114
 [ "$(md5sum /usr/local/lib/liblp.so | cut -d' ' -f1)" = $LIB_MD5 ] || {{ echo "liblp md5 mismatch"; exit 1; }}
-P=$(ps | awk '$4=="bdpprog.1"{{print $1; exit}}'); [ -n "$P" ] || {{ echo "no player"; exit 1; }}
+P=$(ps | awk '$4 ~ /(^|\\/)bdpprog\\.1$/{{print $1; exit}}'); [ -n "$P" ] || {{ echo "no player"; exit 1; }}
 B=$(grep liblp.so /proc/$P/maps | awk '$2=="r-xp"{{split($1,a,"-"); print a[1]; exit}}')
 M=/proc/$P/mem; B=$((0x$B))
 rd(){{ dd if=$M bs=1 skip=$1 count=$2 2>/dev/null | hexdump -v -e "$2/1 \\"%02x\\""; }}

@@ -79,19 +79,56 @@ Pitfalls:
 | `0x7eb5bc94` | `70402de9` | `DOVI_CleanDCacheRange` entry |
 | `0x7eb22120`, `0x7eb207c8` | `f04f2de9` | `i4VDecH265SPSPsr`, `vH265PreParseSPS` entries |
 | `0x7eb26da0`, `0x7eb215d0` | original code | instruction after the two SPS hooks |
-| `0x7e9fa3ac` | `0x7ee41cac` | literal: ESM handle table |
-| `0x7eabd2cc` | `0x7ee6e690` | literal: VDEC instance table |
-| `0x7e9a41ec` | `0x7ee3cb60` | literal: VDP global state |
+| `0x7eac868c`, `0x7eac8950`, `0x7eac8958` | original code | `fgVDecInitProc`: r4 = stream info, `movw r3,#0x4c94`, return point |
+| `0x7eb26934`, `0x7eb26938`, `0x7eb2693c`, `0x7eb26974` | original code | `i4H265_Parse_Syntax_Proc`: r4/r6/r5 set-up, return point |
+| `0x7ea9300c` | `08402de9` | `vVDecResetMultiCore` entry |
+| `0x7e9b60d0` | original code | `VDPCheckFirstPicPts` after the hooked print |
+| `0x7e9be544`, `0x7e9be570`, `0x7e9be5a8` | original code | `_VdpGetNextDisp`: r4 = VDP0, difference at `sp+0x110`, return point |
+| `0x7eabb860`, `0x7eabb874`, `0x7eabb884` | original code | `fgVDecRetrieveEsIsPic`: r6 = stream info, r1 = ES message, return point |
+| `0x7e9fa3ac` | `0x7ee41cac` + D | anchor: `_parESITable` (ESM handle table) |
+| `0x7eabd2cc` | `0x7ee6e690` + D | anchor: VDEC instance table |
+| `0x7e9a41ec` | `0x7ee3cb60` + D | anchor: VDP global state |
+| `0x7eab77c8` | `0x7ee6e698` + D | anchor: `_arVDecEsmInfo` |
+| `0x7eab87d4` | `0x7ee6e738` + D | anchor: `_arVDecEsInfo` |
+| `0x7e98eca8` | `0x7ee3cb94` + D | anchor: `VdpData` |
+
+The anchors give the **driver build's data offset** D: each is a literal pool word of the driver that points at one of
+the global data objects the patch uses (the values above are the RU 65-0131 ones), and all six must show the same D
+(a multiple of 4, at most ±0x1000). Driver builds seen so far share the code but place the module's data and bss
+elsewhere:
+
+| Build | D | Code differences |
+|---|---|---|
+| RU 65-0131 | 0 | — |
+| USA | +0x90 | `vCheckEDID` (HDMI EDID handling) moves code from `0x7ebbbe30` on by 0x30 |
+| third build (region unknown) | +0x50 | HDMI audio input handling (`u1UpdateHdmiIecInput`) and later functions move code from `0x7eb83cb0` on |
+
+Everything the patch hooks or calls lies below `0x7eb83cb0`. Each port was checked against a full driver dump
+(`oppo-dv-mkv-driver-dump.zip`) by classifying every differing word in the shared code range: all are pointer,
+branch or `movw` relocations, and the code caves hold the same original bytes.
+
+`p7kel.sh` ships one blob, built for the RU layout, and moves its data addresses by D when it writes it: 9 words, 3
+literal pool words holding an address and 6 `movw` holding an address's low half (refused if that half would wrap,
+since the `movt` would then change too). `build.sh` also compiles the blob with `-DDSHIFT=0x90`, `0x50` and `0x1000`.
+`mkkinst.py` finds the relocated words from the `0x1000` build, asserts that each is a data address inside an
+anchored object, and that relocating the RU blob by 0x90 / 0x50 / 0x1000 gives exactly the compiled blobs. `check`
+reports the build as `ru`, `us` or `data+0x..`.
 
 It also checks:
 - `/proc/kallsyms`: `printk` at `0x803f7df0` and `jiffies` at `0x805760c0`;
-- the original or patched instruction at each of the 6 hook sites.
+- the original or patched instruction at each of the 12 hook sites. The hook bytes written by released older
+  versions (v1.0.0–v1.2.0 differ at three sites) are recognised too: `check` then reports `sites old` instead of
+  refusing, because the installer runs while the old patch is active and the new one only takes over at the next
+  boot. `on` refuses in that state, and `off` also switches an older version's hooks off.
 
 ### Code cave and hooks
 
-The cave is the dead CLI test function `_FbmCli_Test_4K`, `0x7e98be80..0x7e98c7c0`. Code runs up to `0x7e98c748`;
-the counters and state (`elstat`) follow, up to `0x7e98c7c0`. `p7kel.sh` checks the original contents by md5 (three
-chunks: page split and code/data split), so no firmware bytes are shipped.
+The main cave is the dead CLI test function `_FbmCli_Test_4K`, `0x7e98be80..0x7e98c7c0`. Code runs up to
+`0x7e98c748`; the counters and state (`elstat`) follow, up to `0x7e98c7c0`. Since v1.3.1 the seek and end-of-file
+fixes live in a second cave, the dead CLI test function `_Cmd_ImgResz_TestPerformance` (`0x7e94d210`, 1376 bytes;
+312 bytes of code, then 16 bytes of counters, `c2stat`). Like the first, it is reachable only from a CLI command table. `p7kel.sh` checks
+the original contents of both caves by md5 (five chunks: page split and code/data split), so no firmware bytes are
+shipped.
 
 | Hook | Site | Original instruction | Entry |
 |---|---|---|---|
@@ -101,6 +138,12 @@ chunks: page split and code/data split), so no firmware bytes are shipped.
 | Stop | `VDec_Stop` `0x7eaac99c` | `cmp r0,#7` | `vdp_entry` → `vdp_off(esid)` |
 | EL SPS guard | `i4H265_Parse_Syntax_Proc` `0x7eb26d9c` | `bl i4VDecH265SPSPsr` | `spsfix(ctx, sps_base, pic)` |
 | EL pre-parse guard | `i4H265_Pre_Parse_SPS_Proc` `0x7eb215cc` | `bl vH265PreParseSPS` | `ppfix(esid, .., .., .., out)` |
+| EL FIFO clear | `vESM_FifoClear` tail `0x7e9fd48c` | `mov r3,#0` | `clr_entry` → `clrfix(handle)` |
+| Reparse flag | `fgVDecInitProc` `0x7eac8954` ("ReInit From SSStop") | `strb r2,[r4,r3]` | `nofb_stub` (cave 2) |
+| EL multi-core reset | `i4H265_Parse_Syntax_Proc` `0x7eb26968` | `bne` (skip the reset on single-core ES) | `mc_stub` (cave 2) |
+| Frozen BL frame: record | `VDPCheckFirstPicPts` `0x7e9b60cc` | `bl` to a debug print (kept, after the stub) | `rec_stub` (cave 2) |
+| Frozen BL frame: EL timing | `_VdpGetNextDisp` `0x7e9be5a0` | `b` after the VDP1-vs-VDP0 `PTS_DIFFERENCE` | `cmp_stub` (cave 2) |
+| EL end of stream | `fgVDecRetrieveEsIsPic` `0x7eabb880` | `str r3,[r6,#0x5f4]` (picture start) | `eos_stub` (cave 2) |
 
 #### elfix (EL slice rewrite)
 
@@ -108,7 +151,9 @@ It is called for every barrel-shifter init: BL cores, the look-ahead engine and 
 fifo_start, ...}`, all kernel linear-map addresses.
 
 1. Bound the scan:
-   - ring end = the ESM fifo end recorded by `rdfix` (not the 12 MB window);
+   - ring end = the ESM fifo end recorded by `rdfix` (not the 12 MB window). Since v1.3.1 it is recorded only for
+     the BL and EL handles: `rdfix` also sees the audio and subtitle FIFOs, and with their end an EL access unit
+     across the end of the 8 MB video ring was not rewritten (EL decode error, then a stall);
    - length = the distance to the furthest ESM write pointer for this FIFO, so it never reads unwritten data.
 2. Skip the call if `rdptr` lies inside the EL access unit handled last. Every NAL header parse calls this hook.
 3. Scan from `rdptr`. If it is an EL AU (wrapped NALs), count the wrapped VCL NALs with first_slice = 0. Stop at
@@ -149,6 +194,65 @@ EL flag at `+0x650af`), an SPS wider than 1920 is handled as follows:
 - **`ppfix`** restores the previous pre-parse result. The output is `{w, h, x, valid}`, and the previous values
   are at `out[4..7]`.
 
+The rejected SPS has already overwritten the EL's SPS slot (same id), and the EL frame-buffer group is sized from
+that slot. Since v1.3.1 `spsfix` puts the EL's last width and height back (`elw`/`elh`); before, the EL could get a
+4K buffer group and never decode again.
+
+#### clrfix (EL FIFO clear)
+
+On a seek, trick play or stop the firmware's `vESM_FifoClear` clears the BL's ESM handle and the audio one, but not
+the EL's (handle 3, same FIFO memory). The EL decoder kept its old picture queue and decoded stale entries after a
+seek. At the end of every `vESM_FifoClear(h)`, `clrfix` clears every other handle on the same FIFO memory (with a
+recursion guard).
+
+#### Seek fixes (cave 2, v1.3.1)
+
+In single-stream DV, `_VdpGetNextDisp` holds the BL plane (VDP0) while the EL plane (VDP1) has no frame queued
+(`0x7e9bab50..0x7e9bab6c`; with the VDP debug mask `0x7ee3cb68` bit 0x40 it logs `check main and sub Q buffer
+count`). If the EL plane runs dry after a seek, the BL frames stay queued, the BL decoder runs out of frame buffers
+(state 9), the shared FIFO fills, the EL decoder starves (state 1) and the picture freezes while the clock runs.
+Chapter skips, seeks, and audio or subtitle changes all do a *same-stream stop* and restart. Three ways that
+emptied the EL plane are fixed:
+
+- **`nofb_stub` (stale reparse flag).** `fgNoFbReParse` (stream info `+0x4c9c`) is set between "free frame buffer
+  found" (state 9) and the decode. A full stop clears it (`vVDecReleaseProc`); a same-stream stop did not, so the
+  first EL picture after the restart skipped its frame-buffer setup (`No empty OutFbInfo`) and was lost. The stub
+  does the displaced store and clears the flag on the "ReInit From SSStop" path.
+- **`mc_stub` (EL multi-core reset).** The BL decodes on two cores. `i4H265_Parse_Syntax_Proc` resets the HEVC
+  multi-core block (`vVDecResetMultiCore`) before every BL picture (stream info `+0x65012 == 1`), and a full stop
+  does too (`vH265ReleaseProc`). A same-stream stop that interrupts a BL picture (log: `Wait VDEC_DECODING(vld:0)`)
+  leaves the block stale; the EL's first picture after the restart (single core) then never finishes (`Decode
+  Timeout`, `cur FBId:255`) and the EL resumes about a second later, at its next I picture. Seen in 19 of 20 such
+  skips, against 1 of 81 otherwise. The stub makes the EL decoder (ES 1) do the same reset while its picture count
+  (`+0x10`) is at most 1, unless the BL is decoding at that moment (state 5).
+- **`rec_stub` / `cmp_stub` (frozen BL frame).** VDP1 times each EL frame against the frame VDP0 shows now
+  (`EL − BL` PTS: < 0 late = dropped, 0 shown, > 0 wait; dovi threshold at `0x7ed2d3d8+0x30`). After a same-stream
+  stop VDP0 keeps showing its last pre-seek frame until the first new BL frame is due. After a backward jump that
+  frame is newer than every new EL frame, so VDP1 dropped them all. `rec_stub` records the frame-info pointer of
+  the frame VDP0 shows when the first picture after the restart arrives (`VDPCheckFirstPicPts`, then the original
+  debug print). While VDP0 still shows that frame, `cmp_stub` sets the difference to `+0x7fffffff`, so VDP1 waits,
+  as it does after a forward jump. The record is cleared as soon as VDP0 shows another frame.
+
+The stubs read the VDP0 object pointer (`0x7ee3cb94`) and the ESID 0 stream-info pointer (`0x7ee6e738`); both are
+global data, +0x90 in the USA driver build.
+
+#### End of file (cave 2, v1.3.1)
+
+At the end of the file the EL decoder (MPV1) gets one last ES message from the shared FIFO: a data message with no
+read pointer (`+0x14` = 0) and no picture flags (`+0x10` = 0), covering only the bytes after its last picture. The
+BL decoder first gets the end-of-stream in-band command, which sets the EOS flag (stream info `+0x184` bit 0x80);
+`i4H265VParseProc` then treats such a message as the end (flush the DPB, no picture). The EL never got that
+command, so it parsed the empty message as a picture starting at address 0 (`Forbiden Zero bit error`,
+`SLICE_REF_PIC_LOST`) and, in `fgH265ResultChk`, summed its bitstream bytes from address 0
+(`ui4DecDebugChecksum`, NULL pointer in `v7_dma_inv_range`). The oops killed MPV1: the picture froze on the last
+frame, the player stayed in PLAY, and nothing played again until a reboot. It happened every time, with MEL and
+FEL films; v1.2.0 does the same (tested with the MEL film), and the older releases have the same EL path.
+
+`eos_stub` does the displaced store (`+0x5f4` = picture start) and, for a message with neither a read pointer nor
+picture flags, sets the EOS flag. The EL then takes the firmware's own end-of-stream path, the BL finishes its last
+pictures, playback ends and the player returns to the file list. A read pointer of 0 never occurs in a real
+message (the FIFO is in the kernel linear map), so no other message is affected.
+
 #### vdp_off (stop)
 
 On `VDec_Stop(1)`, if VDP1's state is still 2, it calls `VDP_SetEnable(1, 0)`. That disables the composer EL and
@@ -156,7 +260,8 @@ lets the EL frame buffers be released, which is what the natural end-of-file pat
 
 ### Enable flags and counters
 
-`elstat+0x18` holds the enable mask; the release uses `3219`.
+`elstat+0x18` holds the enable mask; the release uses `7315`. The cave-2 fixes have no enable bit; they are
+switched with the other hooks by `p7kel.sh on|off`.
 
 | Bit | Meaning |
 |---|---|
@@ -167,8 +272,12 @@ lets the EL frame buffers be released, which is what the natural end-of-file pat
 | 128 | FIFO clamp |
 | 1024 | stop fix |
 | 2048 | EL SPS guard |
+| 4096 | EL FIFO clear |
 
-`p7kel.sh status` prints the sites state and the first 32 bytes of `elstat`:
+`p7kel.sh status` prints the sites state (`ok`, `off`, or `old` when an older release's patch is active), the
+first 32 bytes of `elstat`, and `seek=` with the four cave-2 counters: EL multi-core resets, the VDP0 frame recorded
+at the last restart (0 once VDP0 moved on), EL frames held back from the frozen frame, and end-of-stream messages
+flagged (one per file played to the end).
 
 | Word | Field |
 |---|---|

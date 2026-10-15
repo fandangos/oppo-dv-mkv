@@ -114,33 +114,47 @@ They do not touch the region-specific player program, the part that differs betw
   - its load address;
   - the original instruction at every hook point and at the instruction after it;
   - the entry of every driver function the patch calls;
-  - the pointers to every driver table the patch reads;
+  - where the driver's global data sits: six pointers in the driver code to the data the patch uses must all show the
+    same offset;
   - the kernel symbols it uses.
 
-  A different driver fails these checks. Unlike `liblp.so`, the driver comes from a region-specific, encrypted part of
-  the firmware, and **at least the USA build differs**: a USA-region player reported `module fingerprint mismatch`
-  (the driver is 144 bytes larger and its global data sits 0x90 bytes further on).
+  Unlike `liblp.so`, the driver comes from a region-specific, encrypted part of the firmware. Since v1.3.1, **driver
+  builds that differ only in where their global data sits are supported**: the patcher measures that offset on the
+  player and moves the patch's few data addresses by it. Three builds were checked against driver dumps: RU 65-0131
+  (offset 0), USA (+0x90) and a third build of unknown region (+0x50). In each, the hook sites, the code caves and
+  every instruction the patch relies on are identical; their real code changes (HDMI handling) are in parts the patch
+  does not touch. A driver whose patched code differs fails the checks, and nothing is written.
 - **The jailbreak must start `/mnt/ubi_boot/bdpprog` at boot.** The installer never overwrites a
   `/mnt/ubi_boot/bdpprog` that belongs to another mod, and if another mod already patched the same places, the
   patcher sees unexpected bytes and does nothing.
+- **jb_overlay** (the overlay mod with themes such as *Dark Space*, ssh and telnet) is recognised. Its boot script is
+  kept as `/mnt/ubi_boot/bdpprog.prev`: at boot, oppo-dv-mkv starts first and then hands over to the overlay, which
+  keeps working as before. Uninstalling puts the overlay's script back. The subtitle improvements are not installed
+  with the overlay, because it runs its own copy of the player program and its own theme images. Reinstalling the
+  overlay simply switches the Dolby Vision fix off until you install oppo-dv-mkv again.
 
 | Firmware | Status |
 |---|---|
 | RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles) |
-| USA-region player (v65) | **not compatible yet**: different `bdpdrv1` driver build, the installer refuses. Port in progress, see [driver dump](#helping-to-support-another-firmware-driver-dump) |
-| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes; **untested**, at your own risk. Subtitle improvements are skipped |
+| USA-region player (v65) | Dolby Vision fix supported since v1.3.1 (USA driver build). One user with jb_overlay confirmed P8.1 and P7 MEL MKVs in Dolby Vision with a pre-release; the v1.3.1 seek fixes are not yet confirmed on a USA player. Subtitle improvements need the RU player program |
+| Third driver build (data +0x50, `check` reports `driver data+0x50`) | Dolby Vision fix supported since v1.3.1, checked against a driver dump; **untested on a player** |
+| Any of the above with **jb_overlay** (themes) | Dolby Vision fix: chains to the overlay. Subtitle improvements: not installed |
+| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes (it then reports the driver's data offset); **untested**, at your own risk. Subtitle improvements are skipped |
 | Any other firmware version (for example v60), stock firmware, UDP-205 | not supported: the installer refuses |
 
 ### Checking a player without installing anything
 
 Use `oppo-dv-mkv-vX.Y.Z-check.zip` exactly like the installer (see [Install](#install)). It **changes nothing**:
 it only writes a report to `oppo-dv-mkv.log` on the stick, ending with `VERDICT: COMPATIBLE` or
-`VERDICT: NOT COMPATIBLE` and the reason. If you try a jailbreak other than RU 65-0131, please share the report
-(it contains md5s and kernel information, no personal data) by opening an issue.
+`VERDICT: NOT COMPATIBLE` and the reason. If the video driver check fails, the report adds `driver:` lines (the
+instructions that differ and where the driver keeps its data), which often show whether the fix can be ported without
+a driver dump. If you try a jailbreak other than RU 65-0131, please share the report (it contains md5s and kernel
+information, no personal data) by opening an issue.
 
 ### Helping to support another firmware (driver dump)
 
-If the check fails with `module fingerprint mismatch`, the patch has to be ported to your driver build. Porting needs a
+If the check fails with `module fingerprint mismatch` or `unknown driver build`, the patch has to be ported to your
+driver build. Porting needs a
 copy of that driver. `oppo-dv-mkv-driver-dump.zip` (on the release page) makes one. It is **read-only**: it copies the
 loaded `bdpdrv1` driver from memory to the stick, plus a short `info.txt` (kernel and firmware versions, md5s of the
 player program and `liblp.so`, the loaded modules), and writes nothing to the player.
@@ -157,7 +171,13 @@ privately.
 
 ## Install
 
-1. Download `oppo-dv-mkv-vX.Y.Z.zip` from the [Releases](../../releases) page.
+1. Download **one** of these from the [Releases](../../releases) page:
+
+   | File | Installs |
+   |---|---|
+   | `oppo-dv-mkv-vX.Y.Z-full.zip` | Dolby Vision MKV fix **and** better subtitles (recommended on RU 65-0131) |
+   | `oppo-dv-mkv-vX.Y.Z-mkv-only.zip` | Dolby Vision MKV fix only (use this with jb_overlay, or if you want the stock subtitles) |
+   | `oppo-dv-mkv-vX.Y.Z-subtitles-only.zip` | better subtitles only (RU 65-0131 player program) |
 2. Unzip it to the **root** of a FAT32 USB stick. You should see `AutoScript/` and `README.txt` at the top level of
    the stick.
 3. Power the player **off**. Plug the stick into the **rear** USB port, and make sure no other USB storage is
@@ -168,7 +188,9 @@ privately.
    **`INSTALLED`**. If it says **`FAILED`**, the reason is on that line, and nothing was activated.
 6. Power the player **on**. From now on the fix is applied automatically at every boot.
 
-The installer also works as an updater: running a newer release the same way replaces the files.
+The installer also works as an updater: running a newer release the same way replaces the files. You can switch
+between the three options at any time by running another one: it installs what is in that zip and removes the part
+that is not.
 
 ## Uninstall and emergency off switch
 
@@ -185,7 +207,7 @@ The installer also works as an updater: running a newer release the same way rep
 - **Single-track profile 7 only.** Almost all P7 MKVs (MakeMKV, mkvmerge) store the base layer, the enhancement
   layer and the RPU in **one** video track, and that is what this supports. **Dual-track** P7 MKVs (BL and EL in
   two separate video tracks) are **untested** and probably play as HDR10.
-- **MEL** files use exactly the same code path as FEL, but the published tests used FEL material.
+- **MEL** files use exactly the same code path as FEL. Both were tested with full-length films (see Tests).
 - **Profile 5/8 MKVs whose HEVC `CodecPrivate` (hvcC) has no VPS/SPS/PPS** play the stock way, without DV. This is
   typical of MKVs remuxed from an `hev1` MP4. Signalling DV for such files hard-locks the player, so they are
   deliberately left alone. Remuxing them so the parameter sets are in the hvcC (for example mkvmerge from a TS) makes
@@ -194,6 +216,9 @@ The installer also works as an updater: running a newer release the same way rep
 - **Player-led (LLDV) mode** was not tested.
 - At the exact point of a **seek** or a fast-forward step, one or two enhancement-layer pictures may fail to decode.
   This is invisible in practice, and the base layer and audio are unaffected.
+- **Resuming within the last minute or so of a P7 film** froze the picture once during development, right after a
+  test patch was loaded into the running player (the audio clock kept running). It did not happen again in more
+  than 25 later jumps and resumes in the last five minutes with v1.3.1. If it does: Stop, then play again.
 
 ## Troubleshooting
 
@@ -322,6 +347,48 @@ the EL never displays, so this was invisible.
 single-stream DV mode they reject any SPS wider than 1920 on the EL decoder, and its own SPS follows a moment
 later.
 
+### 8. Freezes after chapter skips, seeking, or changing the audio or subtitle track (v1.3.1)
+
+**Symptom:** in P7 MKVs (MEL files much more than FEL), skipping to the next or previous chapter, seeking, or
+changing the audio or subtitle track sometimes froze the picture: the clock and often the audio ran on, nothing else
+happened until Stop. Skipping **back** a chapter froze a MEL film almost every time.
+
+**Cause:** in single-stream Dolby Vision the player shows a base-layer frame only together with its
+enhancement-layer frame. A chapter skip, a seek or a track change restarts both decoders in place. If the
+enhancement-layer plane gets no frame after the restart, the base-layer frames stay queued, the base-layer decoder
+runs out of buffers, the shared input buffer fills up, and the enhancement-layer decoder starves: a deadlock. Six
+things could leave the enhancement layer without frames:
+- After a skip that interrupted a base-layer picture (the base layer decodes on two cores), the shared multi-core
+  hardware block was not reset, and the enhancement layer's first picture never finished decoding. Its next usable
+  picture came about a second later. A full stop resets that block; an in-place restart did not.
+- After a skip **back**, the enhancement-layer plane compared its new frames with the base-layer frame still frozen
+  on screen from before the skip. That frame is newer, so every new enhancement-layer frame looked late and was
+  thrown away.
+- A "re-parse" flag left set by the restart made the first enhancement-layer picture skip its buffer set-up.
+- The enhancement-layer decoder's input queue was not cleared by a seek, so it decoded stale data.
+- After a seek, the enhancement-layer decoder could keep a 4K frame size from the base layer's parameters (the v1.2.0
+  guard rejected them but left the wrong size behind).
+- A picture across the end of the input ring buffer was not fixed when the ring end was taken from the **audio**
+  buffer instead of the video buffer (seen as a stall at fixed points of a film, or right after an audio change).
+
+**Fix:** six kernel hooks, three of them in a second unused test function of the driver. The multi-core block is
+reset before the enhancement layer's first picture, the enhancement-layer plane waits instead of throwing frames
+away while the frozen pre-seek frame is on screen, the flag is cleared and the input queue emptied as a full stop
+does, the frame size is restored, and the ring end comes from the video buffer.
+
+### 9. Crash at the end of every P7 film (v1.3.1)
+
+**Symptom:** when a P7 MKV played to its very end, the picture froze on the last frame and the player stayed in
+play mode. Stop brought back the file list, but no film played again until the player was restarted.
+
+**Cause:** at the end of the file the demuxer sends both decoders a last, empty message. The base-layer decoder
+gets an end-of-stream command before it and ignores it. The enhancement-layer decoder never gets that command, so
+it decoded the empty message as a picture with no data address, and the kernel thread of that decoder crashed.
+
+**Fix:** one more kernel hook (in the second test function). An empty message with no data address marks the end
+of the stream, as the missing command would have. The enhancement layer then finishes like the base layer, and at
+the end of the film the player returns to the file list.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -386,6 +453,26 @@ FIFO releases clamped, 0 decode errors, 0 time-outs.
 | MKV started with audio exactly 297–312 s after power-on (tick counter wrap) | ✅ no lock (v1.0/v1.1: could hard-lock) |
 | P7 single-stream TS with audio, P5 MKV, P8.1 MKV | ✅ unchanged |
 
+### Seeking and chapter skips (v1.3.1)
+
+Two full-length films: a P7 **MEL** UHD remux (36 chapters, Dolby Digital, FLAC and DTS-HD MA tracks) and a P7
+**FEL** UHD remux (19 chapters). Skips were sent over the player's IP control and checked automatically: a skip
+passes when the decoders keep running.
+
+| Test | Before (v1.2.0 / v1.3.0) | v1.3.1 |
+|---|---|---|
+| MEL film, skip back a chapter | froze 4 of 4 times | 26 skips back (6 of them about 25 s), all fine |
+| MEL film, skip forward | froze about 1 in 3 to 1 in 8 | all fine |
+| Skips that landed while a base-layer picture was being decoded | first enhancement-layer picture lost in 19 of 20 | lost in 0 of 15 |
+| FEL film, 30 skips (17 forward, 13 back) | occasional freezes | all fine, picture checked on screen |
+| MEL film, 12 audio and subtitle track changes (DD, FLAC, DTS-HD MA) | — | all fine |
+| Base- and enhancement-layer first picture after each skip | different whenever a picture was lost | identical in every skip |
+| Persistent install, fresh boot: MEL film, 30 skips, 6 skips back after about 25 s, 6 audio changes, every subtitle track and "off" | — | all fine |
+| Persistent install, fresh boot: FEL film, 30 skips, 4 skips back after about 25 s, 4 audio and 4 subtitle changes | — | all fine |
+| MEL film, 7 jumps and 6 stop/resume cycles in the last five minutes | froze once (development build) | all fine |
+| MEL and FEL film, played to the end | decoder crash on the last frame, every time (v1.2.0 too) | playback ends, back to the file list |
+| Starting a film right after another one played to the end | nothing played until a restart | plays normally |
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -446,6 +533,21 @@ each blob is printed. No firmware files are needed or included.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
 
 ## Changelog
+
+- **v1.3.1: recommended update for everyone.** (v1.3.0 was a test build for one USA-region tester and was not
+  published.)
+  - **No more freezes after chapter skips, seeking, or audio/subtitle track changes in P7 MKVs** (fix 8), especially
+    with MEL files and when skipping back.
+  - **P7 films now end normally.** At the very end of the file the enhancement-layer decoder crashed: the picture
+    froze on the last frame and nothing played again until a restart (fix 9). Now the player returns to the file
+    list.
+  - **More driver builds:** the patcher measures where the `bdpdrv1` driver keeps its global data and moves the
+    patch's data addresses to match. This covers the USA build (+0x90) and another build (+0x50), and any other build
+    whose patched code is unchanged.
+  - **jb_overlay** (themes, ssh) is supported: oppo-dv-mkv chains to it instead of refusing.
+  - **Three download options:** full (Dolby Vision + subtitles), MKV fix only, subtitles only.
+  - Updating over an older version works while its patch is active (the driver check recognises it).
+  - Read-only **driver dump** zip, to help port the fix to other firmware builds.
 
 - **v1.2.0: recommended update for everyone on v1.0/v1.1.**
   - Lip sync: the AV-sync controller now goes to the base-layer plane, so P7 MKV audio is in sync. It was about

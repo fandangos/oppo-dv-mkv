@@ -2,7 +2,7 @@
  * Oppo UDP-203, MediaTek MT8581, "RU 65-0131" jailbreak firmware. Linked into the dead CLI test function
  * _FbmCli_Test_4K (0x7e98be80..0x7e98c7c0) of the bdpdrv1 module (always loaded at 0x7e8d3000 on this firmware).
  *
- * Six hooks (see entry.S and docs/TECHNICAL.md):
+ * Hooks (see entry.S and docs/TECHNICAL.md):
  *  1. elfix()   i4VDEC_HAL_H265_InitBarrelShifter: in MKV/TS single-stream P7 the enhancement layer (EL) NALs are
  *               wrapped in NAL type 63 (00 00 01 7E 01 ...). The decoder's software start-code reader strips that
  *               wrapper, but the hardware slice finder of the EL decoder cannot: every 2nd..Nth slice of an EL
@@ -22,6 +22,15 @@
  *  5. spsfix()  i4VDecH265SPSPsr call and
  *  6. ppfix()   vH265PreParseSPS call: after a seek / fast-forward the EL decoder can parse the BL's 4K SPS and decode
  *               EL pictures past the end of its 1080p buffers (green strips until reboot); such an SPS is rejected.
+ *  7. clrfix()  vESM_FifoClear tail: a seek clears the BL's ESM handle but not the EL's (same FIFO memory); the EL
+ *               decoded stale queue entries. Every other handle on the same FIFO is cleared too.
+ *  8.-11.       Seek fixes in a second cave, _Cmd_ImgResz_TestPerformance (entry.S, assembly only): a stale
+ *               "no frame buffer, re-parse" flag after a same-stream stop, the EL's multi-core reset after a stop
+ *               that interrupted a BL picture, and the EL plane timing its frames against the BL plane's frozen
+ *               pre-seek frame. Each left the EL plane empty after a seek, which freezes both planes.
+ * 12. eos_stub  fgVDecRetrieveEsIsPic (second cave, entry.S): the EL decoder's last ES message at the end of the file
+ *               is empty (no read pointer) and comes without the end-of-stream command; it was decoded as a picture
+ *               at address 0 and the decoder thread crashed. Such a message now sets the EOS flag.
  *
  * Some struct fields below are left over from development; the layout is kept so the counters stay where the
  * installer's "status" output expects them. */
@@ -31,14 +40,19 @@ extern void DOVI_CleanDCacheRange(u32 va, u32 len);
 extern int printk(const char *fmt, ...);
 extern volatile u32 jiffies;
 
-struct st { u32 magic, calls, elaus, fixes, maxscan, lastrd, enable, bad, longs, longrd, longwhy, zstop;
-            u32 laecalls, elcalls, waits, timeouts, laerd, sleepmax, skipped, maxwait;
+struct st { u32 magic, calls, elaus, fixes, maxscan, lastrd, enable, bad, longs, longrd, longwhy, clrs;
+            u32 clrbusy, elcalls, waits, timeouts, elw, elh, skipped, maxwait;
             u32 blrd, prevel, blcalls, gated;
             u32 rdcalls, rdfixed, rdtick, rdlag; u32 esa, eea; };
 extern struct st elstat;
 
 #define LIMIT (3u << 20)
-#define ESM_TAB ((u32 **)0x7ee41cacu)
+/* bdpdrv1 global data offset. The shipped blob is built with 0 (RU 65-0131 layout); p7kel.sh moves these addresses by
+ * the offset it measures on the player (USA build +0x90, another build +0x50). build.sh compiles other values to check that. */
+#ifndef DSHIFT
+#define DSHIFT 0u
+#endif
+#define ESM_TAB ((u32 **)(0x7ee41cacu + DSHIFT))
 #define NOSC  (1u << 20)
 #ifndef LOWMEM_LO
 #define LOWMEM_LO 0x80000000u
@@ -95,7 +109,7 @@ void elfix(u32 *bs, u32 vld, u32 lr)
     if (sa == s->esa && s->eea > sa && s->eea < ea && rd < s->eea) ea = s->eea;   /* ESM ring end (bs end can be larger) */
     u8 *b = (u8 *)sa; u32 n = ea - sa, p = rd - sa, el, fx, why;
     u32 d = p >= s->prevel ? p - s->prevel : p + n - s->prevel;
-    if (d < s->gated) { s->skipped++; return; }  /* inside the EL AU handled last: nothing to do */
+    if (d < s->gated) return;  /* inside the EL AU handled last: nothing to do */
     /* never read past the data the splitter has written: stale lines pulled into the D-cache ahead of the
      * writer get read back by the CPU-side parsers after the FIFO is refilled -> garbage -> SoC hang */
     u32 lim = 0, h;
@@ -108,14 +122,11 @@ void elfix(u32 *bs, u32 vld, u32 lr)
         if (w > lim) lim = w;
     }
     if (!lim) { s->bad++; return; }
-    s->lastrd = rd;
     u32 len = scan(b, n, p, 0, sa, &el, &fx, &why, lim);
-    if (why) { s->longs++; s->longrd = rd; s->longwhy = why; }
-    if (len > s->maxscan) s->maxscan = len;
+    if (why) s->longs++;
     if (!el || why) return;                      /* BL / other, or EL AU not complete */
     s->prevel = p; s->gated = len;               /* remember this EL AU */
     if (!fx) return;                             /* already rewritten */
-    s->elcalls++;
     if (!(en & 2)) return;
     scan(b, n, p, 1, sa, &el, &fx, &why, lim);
     s->elaus++;
@@ -125,7 +136,7 @@ void elfix(u32 *bs, u32 vld, u32 lr)
 /* i4ESM_FifoRdPtrSet(handle, rd) entry: in single-stream DV the BL and EL decoders release the SAME video FIFO memory
  * through separate ESM handles (separate fifo structs, same sa/ea); the splitter's free space follows the EL one.
  * The EL runs ahead, so its release let the splitter overwrite BL data not yet decoded. Returns the rd to use. */
-static u32 *esm_fifo(u32 h)
+static __attribute__((noinline)) u32 *esm_fifo(u32 h)
 {
     u32 *e;
     if (h >= 64 || !(e = ESM_TAB[h]) || !((u8 *)e)[0x28]) return 0;
@@ -133,7 +144,7 @@ static u32 *esm_fifo(u32 h)
 }
 
 /* VDEC per-ESID ESM handles (VDec_Update_Esm: base 0x7ee6e690 + 8 + esid*0x14, handle at +0xc): ESID 0 = BL, 1 = EL */
-#define ESID_HANDLE(i) (*(volatile u32 *)(0x7ee6e6a4u + (i) * 0x14))
+#define ESID_HANDLE(i) (*(volatile u32 *)((0x7ee6e6a4u + DSHIFT) + (i) * 0x14))
 u32 rdfix(u32 h, u32 rd)
 {
     struct st *s = &elstat;
@@ -143,8 +154,8 @@ u32 rdfix(u32 h, u32 rd)
     u32 sa = f[0], ea = f[1], wr = f[3], n = ea - sa;
     if (rd < sa || rd > ea || wr < sa || wr > ea || !n) return rd;
     s->rdcalls++;
-    s->esa = sa; s->eea = ea;
     u32 blh = ESID_HANDLE(0);
+    if (h == blh || h == ESID_HANDLE(1)) { s->esa = sa; s->eea = ea; }   /* video FIFO only (audio/subtitles use this too) */
     if (h != ESID_HANDLE(1) || h == blh) return rd;
     u32 *fb = esm_fifo(blh);
     if (!fb || fb[0] != sa) return rd;           /* not single-stream DV (BL/EL in separate FIFOs) */
@@ -154,15 +165,29 @@ u32 rdfix(u32 h, u32 rd)
     u32 mine = wr >= rd ? wr - rd : wr + n - rd, theirs = wr >= o ? wr - o : wr + n - o;
     if (theirs <= mine) return rd;
     s->rdfixed++;
-    u32 lag = rd >= o ? rd - o : rd + n - o;
-    if (lag > s->rdlag) s->rdlag = lag;
     return o;
+}
+
+/* vESM_FifoClear(h) tail (seek, trick play, stop). In single-stream DV the EL decoder reads the video FIFO through its own
+ * ESM handle, but the firmware only clears the BL's: the EL handle keeps its picture queue and read pointer from before
+ * the seek, pointing at data the splitter has since overwritten. The EL decoder then decodes garbage (or the BL's SPS),
+ * and both decoders stall. So every other handle on the same FIFO memory is cleared too. */
+extern void vESM_FifoClear(u32 h);
+void clrfix(u32 h)
+{
+    struct st *s = &elstat;
+    u32 *f = esm_fifo(h), *g, i;
+    if (!(s->enable & 4096) || s->clrbusy || !f) return;
+    s->clrbusy = 1;                              /* vESM_FifoClear below comes back here */
+    for (i = 0; i < 64; i++)
+        if (i != h && (g = esm_fifo(i)) && g[0] == f[0]) { vESM_FifoClear(i); s->clrs++; }
+    s->clrbusy = 0;
 }
 
 /* VDec_Stop(esid) entry. MKV single-stream DV: on STOP the middleware never disables the EL plane (VDP1); it stays
  * in state 2 scanning out freed EL frame buffers (garbage on every screen until reboot). On a natural end the firmware
  * calls VDP_SetEnable(1, 0) itself. So when the EL decoder (ESID 1) is stopped and VDP1 is still on, turn it off. */
-#define VDP_G      ((volatile u32 *)0x7ee3cb60u)
+#define VDP_G      ((volatile u32 *)(0x7ee3cb60u + DSHIFT))
 extern u32 VDP_SetEnable(u32 id, u32 en);
 void vdp_off(u32 esid)
 {
@@ -177,17 +202,21 @@ void vdp_off(u32 esid)
  * decoder (ESID 1) can start at a base-layer access unit and parse the BL's 3840x2160 SPS (same sps id as the EL's).
  * It then builds a 4K frame-buffer group, borrowing memory that the previous EL group still holds; after a few rapid
  * seeks the EL buffers overlap other memory (green strips in the EL picture until reboot). An SPS wider than 1920
- * on the EL decoder in single-stream DV mode is therefore rejected like a malformed one; the EL's own SPS follows. */
+ * on the EL decoder in single-stream DV mode is therefore rejected like a malformed one; the EL's own SPS follows.
+ * The rejected SPS has overwritten the EL's slot (same id), and the EL frame-buffer group is rebuilt from that slot's
+ * size: the EL's last size is put back, else the EL gets a 4K group and never decodes again (hang). */
 extern u32 i4VDecH265SPSPsr(u32 ctx, u32 base, u32 pic);
-#define ESINFO(i) (*(volatile u32 *)(0x7ee6e690u + 0xa8 + (i) * 4))
+#define ESINFO(i) (*(volatile u32 *)((0x7ee6e690u + DSHIFT) + 0xa8 + (i) * 4))
 u32 spsfix(u32 ctx, u32 base, u32 pic)
 {
     u32 r = i4VDecH265SPSPsr(ctx, base, pic), e;
     if (r || !(elstat.enable & 2048) || *(u8 *)(ctx + 0xd4) != 1 || !(e = ESINFO(1))) return r;
     if (*(u8 *)(e + 0x650ac) != 1 || *(u8 *)(e + 0x650af) != 1) return r;   /* not single-stream DV EL */
     u8 *sps = (u8 *)(base + *(u32 *)(base + 0x30) * 0x28a8);
-    if (*(u32 *)(sps + 0x450) <= 1920) return r;
+    u32 *wh = (u32 *)(sps + 0x450);                     /* pic width, height */
+    if (wh[0] <= 1920) { elstat.elw = wh[0]; elstat.elh = wh[1]; return r; }   /* the EL's own size */
     sps[0x2b4] = 0;                                     /* SPS not valid */
+    if (elstat.elw) { wh[0] = elstat.elw; wh[1] = elstat.elh; }   /* frame buffers are sized from this slot */
     elstat.timeouts++;
     return 0xff03;
 }

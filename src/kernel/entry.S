@@ -1,3 +1,6 @@
+#ifndef DSHIFT
+#define DSHIFT 0
+#endif
     .arm
     .section .text.entry,"ax"
     .global entry
@@ -15,7 +18,7 @@ rd_entry:                                   @ i4ESM_FifoRdPtrSet entry (r0 handl
     bl rdfix
     mov r1, r0
     pop {r0, r2, r3, r4, ip, lr}
-    ldr r2, =0x7ee41cac                     @ displaced: ldr r2, [pc, #0xc8]
+    ldr r2, =0x7ee41cac + DSHIFT            @ displaced: ldr r2, [pc, #0xc8]
     b rd_cont
     .ltorg
     .global sync_stub
@@ -51,6 +54,111 @@ vdp_entry:                                  @ VDec_Stop entry (r0 esid)
     pop {r0-r3, ip, lr}
     cmp r0, #7                              @ displaced
     b vdp_cont
+    .global clr_entry
+clr_entry:                                  @ vESM_FifoClear 0x7e9fd48c (r4 handle; replaces mov r3, #0 before the return)
+    push {r0-r3, ip, lr}
+    mov r0, r4
+    bl clrfix
+    pop {r0-r3, ip, lr}
+    mov r3, #0                              @ displaced
+    bx lr
+@ ---- Second code cave: _Cmd_ImgResz_TestPerformance (0x7e94d210, 1376 bytes, a CLI-only test function) ----
+@ Seek fixes for single-stream DV (v1.3.1). In single-stream DV the BL plane (VDP0) shows no frame while the EL plane
+@ (VDP1) has none queued. If the EL plane runs dry after a seek, the BL frames stay queued, the BL decoder runs out of
+@ frame buffers, the shared FIFO fills, the EL decoder starves and playback freezes. The three hooks below remove the
+@ ways the EL plane ran dry after a chapter skip / seek / audio or subtitle change (a "same-stream stop" + restart).
+@ The fourth (eos_stub) handles the end of the file.
+    .section .cave2,"ax"
+    .global nofb_stub
+nofb_stub:                                  @ fgVDecInitProc "ReInit From SSStop" 0x7eac8954 (replaces strb r2, [r4, r3])
+    strb r2, [r4, r3]                       @ displaced: EsInfo+0x4c94 = 1 (r3 = 0x4c94, r4 = EsInfo)
+    add ip, r4, #0x4c00                     @ fgNoFbReParse (EsInfo+0x4c9c) = 0, as a full stop does (vVDecReleaseProc):
+    mov r2, #0                              @ left at 1 by a stop that landed between "free frame buffer found" and
+    strb r2, [ip, #0x9c]                    @ "decode", it made the first picture after the restart skip its
+    mov r2, #1                              @ frame-buffer setup ("No empty OutFbInfo") and be lost
+    bx lr
+    .global mc_stub
+mc_stub:                                    @ i4H265_Parse_Syntax_Proc 0x7eb26968 'bne' (EsInfo+0x65012 != 1: single-core ES)
+    cmp r6, #1                              @ r6 = ES id: the EL decoder only
+    bne 1f
+    ldr r3, [r4, #0x10]                     @ r4 = EsInfo: pictures since the (re)start
+    cmp r3, #1
+    bhi 1f
+    ldr r3, =0x7ee6e738 + DSHIFT            @ ESID 0 (BL) EsInfo
+    ldr r3, [r3]
+    ldr r3, [r3]                            @ BL decoder state 5 = decoding: leave the cores alone
+    cmp r3, #5
+    beq 1f
+    ldr r3, =c2stat
+    ldr r0, [r3]
+    add r0, r0, #1
+    str r0, [r3]
+    mov r0, r5                              @ r5 = VLD id
+    bl vVDecResetMultiCore                  @ the BL (dual core) does this before every picture and a full stop does it
+1:  b mc_cont                               @ (vH265ReleaseProc); a same-stream stop that interrupts a BL picture does not,
+    .ltorg                                  @ and the EL's first picture after the restart then never finishes
+    .global rec_stub
+rec_stub:                                   @ VDPCheckFirstPicPts 0x7e9b60cc (debug-print bl): first picture after a (re)start
+    push {r4, r5}
+    ldr r4, =0x7ee3cb94 + DSHIFT            @ VDP0 object
+    ldr r4, [r4]
+    mov r5, #0
+    ldrb ip, [r4, #0x520]                   @ VDP0 current slot
+    cmp ip, #7
+    bhi 1f
+    ldr r4, [r4, #0x290]
+    add ip, ip, ip, lsl #2
+    add r4, r4, ip, lsl #3
+    ldrb ip, [r4]
+    cmp ip, #0xff
+    ldrne r5, [r4, #8]                      @ frame info of the frame VDP0 shows now (frozen during the seek)
+1:  ldr r4, =c2stat
+    str r5, [r4, #4]
+    pop {r4, r5}
+    b vdp_print                             @ the original debug print (r0-r3 untouched)
+    .global cmp_stub
+cmp_stub:                                   @ _VdpGetNextDisp 0x7e9be5a0: VDP1 timed its next EL frame against VDP0's current
+    ldrb r3, [r4, #0x520]                   @ frame (r4 = VDP0; EL - BL PTS at [sp, #0x110]; < 0 = late = dropped).
+    ldr r2, [r4, #0x290]                    @ After a backward seek VDP0 still shows its newer pre-seek frame, so every new
+    add r3, r3, r3, lsl #2                  @ EL frame looked late and was dropped. While VDP0 shows the frame it showed when
+    add r2, r2, r3, lsl #3                  @ the first picture after the restart arrived, the EL frame counts as early
+    ldr r2, [r2, #8]                        @ (VDP1 waits), as after a forward seek.
+    ldr r1, =c2stat
+    ldr r0, [r1, #4]
+    cmp r0, r2
+    movne r0, #0
+    strne r0, [r1, #4]                      @ VDP0 has moved on: normal timing from now on
+    bne cmp_cont
+    ldr r0, [r1, #8]
+    add r0, r0, #1
+    str r0, [r1, #8]
+    mvn r0, #0x80000000                     @ difference = +0x7fffffff
+    mov r1, #0
+    str r0, [sp, #0x110]
+    str r1, [sp, #0x114]
+    b cmp_cont
+    .global eos_stub
+eos_stub:                                   @ fgVDecRetrieveEsIsPic 0x7eabb880 (replaces str r3, [r6, #0x5f4]): r1 = ES message,
+    str r3, [r6, #0x5f4]                    @ r6 = EsInfo. Displaced: picture start = the message's read pointer.
+    cmp r3, #0                              @ At the end of the file the EL decoder gets an empty data message (no start, no
+    bxne lr                                 @ picture flags) but not the end-of-stream command that sets the EOS flag
+    ldr r3, [r1, #0x10]                     @ (EsInfo+0x184 bit 0x80) before it, as the BL decoder does. It decoded that
+    cmp r3, #0                              @ message as a picture starting at address 0 and the decoder thread crashed
+    bne 1f                                  @ (NULL in ui4DecDebugChecksum, fgH265ResultChk). With the flag set, the
+    ldr r3, [r6, #0x184]                    @ firmware's own end-of-stream path runs: the EL flushes its last pictures,
+    orr r3, r3, #0x80                       @ playback ends and the player returns to the file list.
+    str r3, [r6, #0x184]
+    ldr ip, =c2stat
+    ldr r3, [ip, #12]
+    add r3, r3, #1
+    str r3, [ip, #12]
+1:  mov r3, #0
+    bx lr
+    .ltorg
+    .section .cave2d,"aw"
+    .global c2stat
+c2stat:                                     @ multi-core resets, VDP0 frame at restart, EL frames held back, EL end of stream
+    .word 0, 0, 0, 0
     .section .data.st,"aw"
     .global elstat
 elstat:
