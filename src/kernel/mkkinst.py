@@ -38,7 +38,7 @@ assert all(CAVE + len(x) == CAVE_END for x in blobs.values())
 # and of the second cave (_Cmd_ImgResz_TestPerformance, also a CLI-only test function): code part, counters
 ORIG_MD5 = {0x7e98be80: '20fda5a2aa0c88fd07884b2b3364eea1', 0x7e98c000: '829543b6531490f4e7bf9c18348de5f8',
             0x7e98c748: '11a4b898f069093cc19eb1dee12733fd',
-            0x7e94d210: 'ef5d3113f52fc1f749b325ae0effcd65', 0x7e94d348: '8d87977c7fb62f0263251f8063a32801'}
+            0x7e94d210: 'ceebe1171726ede7babd38ff302cfedc', 0x7e94d3d0: '41c64f39634afe69ec14047ee05e12a7'}
 CAVE2 = 0x7e94d210
 syms = {}
 nm = lambda n: subprocess.run(['llvm-nm', f'{D}/build/elfix-{n}.elf'], capture_output=True, text=True).stdout
@@ -87,7 +87,7 @@ sites = [  # (VA, original instruction, patched instruction)
     (0x7ea9c7b4, bytes.fromhex('f3412de9'), b(0x7ea9c7b4, syms['entry'])),       # i4VDEC_HAL_H265_InitBarrelShifter
     (0x7e9fa2dc, bytes.fromhex('c8209fe5'), b(0x7e9fa2dc, syms['rd_entry'])),    # i4ESM_FifoRdPtrSet
     (0x7e9c0c48, bytes.fromhex('0cfdf8eb'), bl(0x7e9c0c48, syms['sync_stub'])),  # u4VDP_AssignSyncCtrl (debug-print bl)
-    (0x7eaac99c, bytes.fromhex('070050e3'), b(0x7eaac99c, syms['vdp_entry'])),   # VDec_Stop
+    (0x7eaac99c, bytes.fromhex('070050e3'), b(0x7eaac99c, syms['vdp_gate'])),    # VDec_Stop (single-stream DV -> vdp_entry)
     (0x7eb26d9c, bytes.fromhex('dfecffeb'), bl(0x7eb26d9c, syms['spsfix'])),     # bl i4VDecH265SPSPsr (Parse_Syntax_Proc)
     (0x7eb215cc, bytes.fromhex('7dfcffeb'), bl(0x7eb215cc, syms['ppfix'])),      # bl vH265PreParseSPS (Pre_Parse_SPS_Proc)
     (0x7e9fd48c, bytes.fromhex('0030a0e3'), bl(0x7e9fd48c, syms['clr_entry'])),  # vESM_FifoClear tail (mov r3, #0)
@@ -99,10 +99,13 @@ sites = [  # (VA, original instruction, patched instruction)
     # end of file (second cave)
     (0x7eabb880, bytes.fromhex('f43586e5'), bl(0x7eabb880, syms['eos_stub'])),   # fgVDecRetrieveEsIsPic (str r3, [r6, #0x5f4])
 ]
-# Hook bytes written by released older versions (v1.0.0/v1.1.0: 0x7eaac99c; v1.2.0: the two SPS guards; every other site
-# holds the same bytes in all versions). The installer runs while the old version's patch is active in RAM; "check" then
-# reports "sites old" instead of refusing, and the new patch takes over at the next boot.
-OLD_PATCHED = [(0x7eaac99c, '577dfbea'), (0x7eb26d9c, 'f495f9eb'), (0x7eb215cc, '12acf9eb')]
+# Hook bytes written by released older versions (v1.0.0/v1.1.0: 0x7eaac99c; v1.2.0: the two SPS guards; v1.3.1: VDec_Stop
+# and the second-cave stubs, which moved in v1.4.0; every other site holds the same bytes in all versions). The installer
+# runs while the old version's patch is active in RAM; "check" then reports "sites old" instead of refusing, and the new
+# patch takes over at the next boot.
+OLD_PATCHED = [(0x7eaac99c, '577dfbea'), (0x7eb26d9c, 'f495f9eb'), (0x7eb215cc, '12acf9eb'),
+               (0x7eaac99c, '5e7dfbea'), (0x7eac8954, '2d12faeb'), (0x7eb26968, '2e9af81a'), (0x7e9b60cc, '685cfeeb'),
+               (0x7e9be5a0, '443bfeea'), (0x7eabb880, '9f46faeb')]
 # Fingerprint of the bdpdrv1 module the blob was built for (read-only check before anything is written):
 # continuation instructions after each hook and entry words of the module functions the blob calls. The ANCHORS then
 # give the data offset of the driver build.
@@ -113,7 +116,9 @@ FPRINT = [(0x7ea9c7b8, '0150a0e1'), (0x7e9fa2e0, '08402de9'), (0x7eaac9a0, '3740
           (0x7eb26934, '0240a0e1'), (0x7eb26938, '0060a0e1'), (0x7eb2693c, '0150a0e1'), (0x7eb26974, 'd630d7e5'), # Parse_Syntax_Proc
           (0x7ea9300c, '08402de9'), (0x7e9b60d0, 'fa608be1'),                                                     # vVDecResetMultiCore, FirstPicPts
           (0x7e9be544, '004093e5'), (0x7e9be570, '110e8de2'), (0x7e9be5a8, 'b43c1fe5'),                           # _VdpGetNextDisp
-          (0x7eabb860, 'ec0586e5'), (0x7eabb874, '8c109de5'), (0x7eabb884, '183091e5')]                           # fgVDecRetrieveEsIsPic
+          (0x7eabb860, 'ec0586e5'), (0x7eabb874, '8c109de5'), (0x7eabb884, '183091e5'),                           # fgVDecRetrieveEsIsPic
+          # single-stream DV gate: vVDec_Set_Dolby_Info stores fgIsSingle at EsInfo+0x650ac (0x6503c + 0x6c + 5 - 1)
+          (0x7eaabaa8, '3c500600'), (0x7eaaba34, '6c3083e2'), (0x7eaaba3c, '053083e2'), (0x7eaaba48, '013043e2'), (0x7eaaba50, '03c0c0e7')]
 KSYMS = [('printk', 0x803f7df0), ('jiffies', 0x805760c0)]
 esc = lambda x: ''.join('\\x%02x' % c for c in x)
 def seg(a, e, f, fn):   # shell text for chunk [a, e): static bytes (formatted by f) + relocated words ($(fn word kind))
@@ -126,6 +131,7 @@ out = ['#!/bin/sh',
  '# oppo-dv-mkv: bdpdrv1 kernel RAM patch for Dolby Vision profile 7 (FEL/MEL) from single-track MKV. usage: on|off|status|check|diag',
  '# EL slice unwrap for the HW decoder, EL FIFO release clamp, VDP1 SyncCtrl redirect, EL plane off on STOP, EL SPS guard,',
  '# EL FIFO clear on seek, seek fixes (stale reparse flag, EL multi-core reset, EL plane vs frozen BL frame), EL end of stream.',
+ '# EL plane off, seek and end-of-stream fixes act only in single-stream DV (MKV / TS), not on Blu-ray.',
  '# Generated by src/kernel/mkkinst.py from build/elfix-ru.bin (md5 %s) + -c2 (md5 %s), relocated on the player.' % (hashlib.md5(blobs['ru']).hexdigest(), hashlib.md5(blobs2['ru']).hexdigest()),
  'export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin',
  'grep -q "^bdpdrv1 .* 0x7e8d3000 " /proc/modules || { echo "bdpdrv1 not at 0x7e8d3000 (unsupported firmware)"; exit 1; }',

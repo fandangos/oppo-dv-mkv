@@ -2,21 +2,27 @@ oppo-dv-mkv - Dolby Vision (profile 5, 7 FEL/MEL, 8) from MKV for the jailbroken
 https://github.com/fandangos/oppo-dv-mkv
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) on the RU 65-0131 player
-program.
+program, and a factory menu shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0) on the
+RU 65-0131 and jb_overlay V3 player programs. On the factory page NEVER press "Fmt buda" / "Fmt apda" (they format
+storage); read the README section "Factory menu" first.
 
 !!! USE AT YOUR OWN RISK. This modifies how your player boots. The author(s) accept NO responsibility for
 !!! any damage, bricked players, lost warranty or anything else. Read the full README on GitHub first.
 
 WHICH ZIP
-  oppo-dv-mkv-*-full.zip            Dolby Vision MKV fix + better subtitles
-  oppo-dv-mkv-*-mkv-only.zip        Dolby Vision MKV fix only (use this with jb_overlay themes)
-  oppo-dv-mkv-*-subtitles-only.zip  better subtitles only
-  Running another one later switches to it (installs what is in that zip, removes the part that is not).
+  oppo-dv-mkv-*-full.zip               Dolby Vision MKV fix + better subtitles + factory menu shortcut
+  oppo-dv-mkv-*-mkv-subtitles.zip      Dolby Vision MKV fix + better subtitles
+  oppo-dv-mkv-*-mkv-only.zip           Dolby Vision MKV fix only
+  oppo-dv-mkv-*-subtitles-only.zip     better subtitles only
+  oppo-dv-mkv-*-factory-menu-only.zip  factory menu shortcut only
+  Each part is checked on its own: a part that cannot be installed safely on your player is skipped, the others
+  are installed. Running another zip later switches to it (installs what is in that zip, removes the rest).
 
 REQUIREMENTS
   - Oppo UDP-203 with a jailbreak built on Oppo's v65 firmware. Tested: the free "RU 65-0131" jailbreak.
     USA-region players: Dolby Vision fix supported (USA driver build). jb_overlay: supported (chained).
-    Others: untested; the installer checks the firmware and refuses (changing nothing) if it does not match.
+    Others: untested; the installer checks each part and skips the ones that do not match (changing nothing at all
+    if no part matches).
     To check a player WITHOUT installing, use the oppo-dv-mkv-*-check.zip release the same way.
   - A FAT32 USB stick. No other USB storage plugged in while installing.
   - Display set to TV-led Dolby Vision (all testing was done in TV-led mode, NOT player-led / low latency).
@@ -26,7 +32,8 @@ INSTALL
   2. Power the player OFF, plug the stick into the REAR USB port, power the player ON.
      At boot the player runs AutoScript/install.sh from the stick (takes a second or two).
   3. Wait until the home menu has been up for about 30 seconds, power the player OFF and remove the stick.
-  4. Optional: check oppo-dv-mkv.log in the root of the stick on a PC - it must contain a line starting with "INSTALLED".
+  4. Optional: open oppo-dv-mkv-result.txt in the root of the stick on a PC. First line INSTALLED or FAILED, then one
+     line per part: installed / NOT installed (with the reason) / not in this zip. Full log: oppo-dv-mkv.log.
   5. Power the player ON. The fix is now active at every boot.
 
 UNINSTALL

@@ -5,7 +5,7 @@ UDP-203 on Oppo's v65 firmware (developed and tested on the **RU 65-0131** jailb
 - `liblp.so` md5 `e39b358c5b0948933f49fd3099f81114` (identical in all regional v65 firmwares)
 - `bdpdrv1` kernel module loaded at `0x7e8d3000`, verified by fingerprint (see below)
 - the region-specific player program (`bdpprog.1`, md5 `49b649bdcffe8b611f1b7bbc0d9fa0b1` on RU 65-0131) is not
-  patched
+  patched by the Dolby Vision fix; the subtitle improvements and the factory menu shortcut patch it in RAM
 
 The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 
@@ -15,8 +15,10 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 |---|---|---|---|
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
+| Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
+| Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
 
-Both patchers are idempotent (`on` when already on does nothing) and reversible (`off`). They verify every patch
+The patchers are idempotent (`on` when already on does nothing) and reversible (`off`). They verify every patch
 site before writing, and they write the code blob before redirecting any call into it.
 
 ## Part 1: liblp.so (MKV signalling)
@@ -126,7 +128,8 @@ It also checks:
 The main cave is the dead CLI test function `_FbmCli_Test_4K`, `0x7e98be80..0x7e98c7c0`. Code runs up to
 `0x7e98c748`; the counters and state (`elstat`) follow, up to `0x7e98c7c0`. Since v1.3.1 the seek and end-of-file
 fixes live in a second cave, the dead CLI test function `_Cmd_ImgResz_TestPerformance` (`0x7e94d210`, 1376 bytes;
-312 bytes of code, then 16 bytes of counters, `c2stat`). Like the first, it is reachable only from a CLI command table. `p7kel.sh` checks
+v1.4.0: 448 bytes of code, then 16 bytes of counters, `c2stat` at `0x7e94d3d0`; the original bytes are identical in
+every known driver build up to `0x7e94d728`). Like the first, it is reachable only from a CLI command table. `p7kel.sh` checks
 the original contents of both caves by md5 (five chunks: page split and code/data split), so no firmware bytes are
 shipped.
 
@@ -135,7 +138,7 @@ shipped.
 | EL slice rewrite | `i4VDEC_HAL_H265_InitBarrelShifter` `0x7ea9c7b4` | `push {r0,r1,r4-r8,lr}` | `entry` → `elfix(bs, vld, lr)` |
 | FIFO clamp | `i4ESM_FifoRdPtrSet` `0x7e9fa2dc` | `ldr r2,[pc,#0xc8]` (literal `0x7ee41cac`) | `rd_entry` → `rdfix(handle, rd)` returns the rd to use |
 | AV-sync guard | `u4VDP_AssignSyncCtrl` `0x7e9c0c48` | `bl` to a debug print (replaced) | `sync_stub` |
-| Stop | `VDec_Stop` `0x7eaac99c` | `cmp r0,#7` | `vdp_entry` → `vdp_off(esid)` |
+| Stop | `VDec_Stop` `0x7eaac99c` | `cmp r0,#7` | `vdp_gate` (cave 2, single-stream DV only) → `vdp_entry` → `vdp_off(esid)` |
 | EL SPS guard | `i4H265_Parse_Syntax_Proc` `0x7eb26d9c` | `bl i4VDecH265SPSPsr` | `spsfix(ctx, sps_base, pic)` |
 | EL pre-parse guard | `i4H265_Pre_Parse_SPS_Proc` `0x7eb215cc` | `bl vH265PreParseSPS` | `ppfix(esid, .., .., .., out)` |
 | EL FIFO clear | `vESM_FifoClear` tail `0x7e9fd48c` | `mov r3,#0` | `clr_entry` → `clrfix(handle)` |
@@ -204,6 +207,21 @@ On a seek, trick play or stop the firmware's `vESM_FifoClear` clears the BL's ES
 the EL's (handle 3, same FIFO memory). The EL decoder kept its old picture queue and decoded stale entries after a
 seek. At the end of every `vESM_FifoClear(h)`, `clrfix` clears every other handle on the same FIFO memory (with a
 recursion guard).
+
+#### Single-stream DV only (v1.4.0)
+
+The firmware plays Dolby Vision in two modes, stored per stream by `vVDec_Set_Dolby_Info` (`0x7eaaba08`; printed as
+`[ESID_x] Hdr_Type: 2,fgIsDual: …,fgIsSingle: …`): stream info `+0x650a8` Hdr_Type, `+0x650ac` **fgIsSingle**,
+`+0x650ad` fgIsDual, `+0x650ae..+0x650b0` BL / EL / RPU present. MKV and TS (BL, EL and RPU in one video track) are
+single-stream (`fgIsSingle` 1 on both ESIDs). UHD Blu-ray (separate BL and EL streams) is dual-stream (`fgIsSingle`
+0), the firmware's own working path. In v1.3.1 the cave-2 stubs and the stop hook did not check the mode and also
+ran on discs: `mc_stub` reset the multi-core block about 11 times per decoder (re)start while the dual-core BL could
+be mid-picture, which showed as green strips in a disc menu with looping DV video and could hang playback after
+chapter skips. Since v1.4.0 every cave-2 stub returns to the original path unless `fgIsSingle` is 1 (`nofb_stub`,
+`mc_stub` and `eos_stub` read their own stream info, `rec_stub` the EL's (ESID 1, `0x7ee6e73c`), `cmp_stub` does
+nothing without a record), and `VDec_Stop` goes through `vdp_gate`, which calls `vdp_entry` only when the EL stream is
+single-stream. `fgIsSingle` is cleared at a full stop. Fingerprint words for the field: the `vVDec_Set_Dolby_Info`
+stores at `0x7eaaba34..0x7eaaba50` and the literal `0x6503c` at `0x7eaabaa8`.
 
 #### Seek fixes (cave 2, v1.3.1)
 
@@ -275,7 +293,7 @@ switched with the other hooks by `p7kel.sh on|off`.
 | 4096 | EL FIFO clear |
 
 `p7kel.sh status` prints the sites state (`ok`, `off`, or `old` when an older release's patch is active), the
-first 32 bytes of `elstat`, and `seek=` with the four cave-2 counters: EL multi-core resets, the VDP0 frame recorded
+first 32 bytes of `elstat`, and `seek=` with the four cave-2 counters (`c2stat`, `0x7e94d3d0`), all zero on discs: EL multi-core resets, the VDP0 frame recorded
 at the last restart (0 once VDP0 moved on), EL frames held back from the frozen frame, and end-of-stream messages
 flagged (one per file played to the end).
 
@@ -318,6 +336,30 @@ installer:
 
 At boot the wrapper replaces the `/res` symlink by a directory of symlinks and points `image_bdp83.bin` at the rebuilt
 file. This happens in RAM, so the root filesystem is never written.
+
+## Part 4: factory menu shortcut (`fpage.sh`)
+
+The Factory Page is built by the Playback Setup key handler `FUN_008482f8` (called from `FUN_00848980`). Its
+trigger: the list's highlighted index (widget command `0x1000301d`) must be 1 (Gapless Playback); key `0xbf00e`
+(F3 in the CLI key table, which lists code, name pairs) arms it (state `0x13464c4`: `+0x129` armed, `+0x12a` count,
+`+0x12b..` buffer, cleared); keys `0xbf010` (F5) and `0xbf016` (F11) are stored as `key - 0xc` and compared with
+`{4, 10}` (`0x123887a`, 2 bytes); any other key disarms. On a match it clears the firmware-update tag check flag
+`0x12515d9`, builds the page in the Setup widget block `0x134512c` and runs `ipcd_exec("inetd")`. Digit keys are
+`0x10030..0x10039`.
+
+| Site | Original | Patched |
+|---|---|---|
+| `0x8483bc` literal | `0x000bf010` (F5) | `0x00010030` (`0`) |
+| `0x84838a` | `adds r1,#6` (F11 = F5 + 6) | `adds r1,#0` (`0`) |
+| `0x8483cc` | `beq.w 0x848966` (not armed: return) | `beq.w 0x848394` (arm: `r2` = state address, non-zero; `r3` = 0) |
+| `0x8483e2` | `movs r2,#2` (compare length) | `movs r2,#3` |
+| `0x8486a4` literal | `0x0123887a` (`{4,10}`) | `0x00fe77e5`: three `0x24` bytes (`'0' - 0xc`) in a read-only table |
+
+So the first 0 arms, the next three fill the buffer and match. F3 (`0x10028` after the change) can no longer arm it.
+The sites are the same in the RU 65-0131 program (`49b649bd`) and the jb_overlay V3 copy (`82e04bcf`: 40 bytes differ,
+`res` → `tmp` in five resource paths and a few `.text1` patches). `fpage.sh` finds the player by name, checks the md5
+of `/proc/<pid>/exe` and writes through `/proc/<pid>/mem`, after checking every site holds the original or the
+patched bytes.
 
 ## Debugging tips (for developers)
 

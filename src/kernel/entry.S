@@ -68,10 +68,30 @@ clr_entry:                                  @ vESM_FifoClear 0x7e9fd48c (r4 hand
 @ frame buffers, the shared FIFO fills, the EL decoder starves and playback freezes. The three hooks below remove the
 @ ways the EL plane ran dry after a chapter skip / seek / audio or subtitle change (a "same-stream stop" + restart).
 @ The fourth (eos_stub) handles the end of the file.
+@ v1.4.0: every hook in this cave acts only in single-stream DV. UHD Blu-ray (BL and EL in separate streams) runs the
+@ firmware's own dual-stream path; there the EL multi-core reset cut BL pictures short (green strips in disc menus,
+@ hangs after chapter skips) and the other hooks are not needed.
+    .macro single r, es                     @ Z set if EsInfo \es is in single-stream DV mode: fgIsSingle (EsInfo+0x650ac,
+    add \r, \es, #0x65000                   @ written by vVDec_Set_Dolby_Info) = 1 for MKV / TS (BL, EL and RPU in one
+    ldrb \r, [\r, #0xac]                    @ video track), 0 on Blu-ray (fgIsDual) and without DV
+    cmp \r, #1
+    .endm
     .section .cave2,"ax"
+    .global vdp_gate
+vdp_gate:                                   @ VDec_Stop entry 0x7eaac99c (r0 esid): the EL plane fix (vdp_entry) only in
+    ldr ip, =0x7ee6e73c + DSHIFT            @ single-stream DV; ESID 1 (EL) EsInfo
+    ldr ip, [ip]
+    cmp ip, #0
+    beq 1f
+    single ip, ip
+    beq vdp_entry
+1:  cmp r0, #7                              @ displaced
+    b vdp_cont
     .global nofb_stub
 nofb_stub:                                  @ fgVDecInitProc "ReInit From SSStop" 0x7eac8954 (replaces strb r2, [r4, r3])
     strb r2, [r4, r3]                       @ displaced: EsInfo+0x4c94 = 1 (r3 = 0x4c94, r4 = EsInfo)
+    single ip, r4
+    bxne lr
     add ip, r4, #0x4c00                     @ fgNoFbReParse (EsInfo+0x4c9c) = 0, as a full stop does (vVDecReleaseProc):
     mov r2, #0                              @ left at 1 by a stop that landed between "free frame buffer found" and
     strb r2, [ip, #0x9c]                    @ "decode", it made the first picture after the restart skip its
@@ -80,6 +100,8 @@ nofb_stub:                                  @ fgVDecInitProc "ReInit From SSStop
     .global mc_stub
 mc_stub:                                    @ i4H265_Parse_Syntax_Proc 0x7eb26968 'bne' (EsInfo+0x65012 != 1: single-core ES)
     cmp r6, #1                              @ r6 = ES id: the EL decoder only
+    bne 1f
+    single r3, r4
     bne 1f
     ldr r3, [r4, #0x10]                     @ r4 = EsInfo: pictures since the (re)start
     cmp r3, #1
@@ -100,9 +122,15 @@ mc_stub:                                    @ i4H265_Parse_Syntax_Proc 0x7eb2696
     .global rec_stub
 rec_stub:                                   @ VDPCheckFirstPicPts 0x7e9b60cc (debug-print bl): first picture after a (re)start
     push {r4, r5}
+    mov r5, #0
+    ldr r4, =0x7ee6e73c + DSHIFT            @ ESID 1 (EL) EsInfo: single-stream DV only, else nothing recorded
+    ldr r4, [r4]
+    cmp r4, #0
+    beq 1f
+    single r4, r4
+    bne 1f
     ldr r4, =0x7ee3cb94 + DSHIFT            @ VDP0 object
     ldr r4, [r4]
-    mov r5, #0
     ldrb ip, [r4, #0x520]                   @ VDP0 current slot
     cmp ip, #7
     bhi 1f
@@ -125,6 +153,8 @@ cmp_stub:                                   @ _VdpGetNextDisp 0x7e9be5a0: VDP1 t
     ldr r2, [r2, #8]                        @ (VDP1 waits), as after a forward seek.
     ldr r1, =c2stat
     ldr r0, [r1, #4]
+    cmp r0, #0                              @ nothing recorded (not single-stream DV, or VDP0 had no frame)
+    beq cmp_cont
     cmp r0, r2
     movne r0, #0
     strne r0, [r1, #4]                      @ VDP0 has moved on: normal timing from now on
@@ -145,6 +175,8 @@ eos_stub:                                   @ fgVDecRetrieveEsIsPic 0x7eabb880 (
     ldr r3, [r1, #0x10]                     @ (EsInfo+0x184 bit 0x80) before it, as the BL decoder does. It decoded that
     cmp r3, #0                              @ message as a picture starting at address 0 and the decoder thread crashed
     bne 1f                                  @ (NULL in ui4DecDebugChecksum, fgH265ResultChk). With the flag set, the
+    single r3, r6
+    bne 1f
     ldr r3, [r6, #0x184]                    @ firmware's own end-of-stream path runs: the EL flushes its last pictures,
     orr r3, r3, #0x80                       @ playback ends and the player returns to the file list.
     str r3, [r6, #0x184]

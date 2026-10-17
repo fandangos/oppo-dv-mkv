@@ -7,6 +7,8 @@ remuxing or conversion.
 **Plus better subtitles:** anti-aliased text instead of jagged 1-bit glyphs, a thicker outline with a real black
 option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby Vision.
 
+**Plus a factory menu shortcut:** opens Oppo's hidden service page (versions, region codes) with the normal remote.
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -38,6 +40,7 @@ option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby
 ## Contents
 - [What it does](#what-it-does)
 - [Better subtitles](#better-subtitles)
+- [Factory menu](#factory-menu)
 - [Requirements](#requirements)
 - [Compatibility](#compatibility)
 - [Install](#install)
@@ -90,6 +93,47 @@ the region-specific part of the firmware. On any other jailbreak the installer s
 Vision fix is unaffected. The menu colour squares are rebuilt **on the player** from its own image file plus 8 small
 colour squares that ship with this project; no firmware file is distributed.
 
+**Other regions and jb_overlay.** Removing or disabling jb_overlay does not bring the subtitle improvements to a
+player from another region: its stock player program (`/usr/local/bin/bdpprog.1`) is different too, so the installer
+still skips them. The patch changes a few fixed places in the player program (colour table, glyph rendering flags,
+outline width), and the library part (`liblp.so`) is already identical in every region, so it can probably be ported
+to other player programs. If you want the better subtitles on your player, open an issue with the md5 from the check
+report (`bdpprog.1` and `running`) and share these files privately, like the driver dump: `/usr/local/bin/bdpprog.1`
+and, with jb_overlay, the copy it runs, `/mnt/ubi_boot/jb_overlay/bdp/bdpprog.1`. With jb_overlay the colour squares
+in the subtitle menu would probably stay unchanged, because the overlay's theme has its own images.
+
+## Factory menu
+
+The player has a hidden service page, the **Factory Page**. Its stock trigger needs keys that only Oppo's factory
+remote has. With the factory menu shortcut installed, the normal remote opens it:
+
+1. Press **Setup** and open **Playback Setup**.
+2. Move the cursor to the **second item, Gapless Playback**. Do not press Enter.
+3. Press **0 0 0 0**.
+
+The page shows the firmware version, sub version and loader version, the DVD and Blu-ray region codes, and some
+service buttons. Close it with Return.
+
+> ⚠️ **Look, but do not press anything on this page unless you know exactly what it does.**
+> - **Fmt buda** and **Fmt apda** **format** storage areas of the player.
+> - The **region** fields change the player's stored DVD / Blu-ray region. This was not tested. The code that saves
+>   a new region also resets other data, which was not analysed.
+> - **Reset Password** was not tested either.
+
+Opening the page runs Oppo's own code, unchanged, and that code also does two things until the next power cycle:
+- **The firmware update stops checking the region/model tag** of update files. Do not run update files meant for
+  another region or model while it is off (power-cycle first).
+- **It starts `inetd`, a telnet server.** It can only listen when the player's network (IP) control is switched off,
+  because both use port 23, and logging in needs the player's root password, which is not known. (Switching IP control
+  off froze the Setup menu once during testing; a power cycle fixed it.)
+
+How it works: the page's trigger in the player program waits, with Gapless Playback highlighted, for the factory
+keys F3, F5 and F11. The shortcut replaces these three keys by the digit 0, in place (5 small edits, in RAM, at every
+boot): the first 0 arms the trigger, three more open the page, any other key cancels. Nothing else changes.
+It needs the exact player program it was made for: the RU 65-0131 free jailbreak (`49b649bd…`), or the copy of it
+that **jb_overlay V3** runs (`82e04bcf…`, the same program with 40 bytes changed for the theme, none of them near
+the trigger). On any other player program the installer skips it and writes why in `oppo-dv-mkv-result.txt`.
+
 ## Requirements
 
 - An **Oppo UDP-203**.
@@ -105,7 +149,10 @@ The patches modify two pieces of Oppo's firmware:
 - the playback library `liblp.so`;
 - the `bdpdrv1` video driver (a kernel module).
 
-They do not touch the region-specific player program, the part that differs between regions and between jailbreaks.
+The Dolby Vision fix does not touch the region-specific player program, the part that differs between regions and
+between jailbreaks. The subtitle improvements and the factory menu shortcut do patch the player program, so they are
+installed only on the exact programs they were made for (checked by the md5 of the program that is running). Each
+part is checked on its own: the installer installs the parts that pass, skips the others and writes why.
 
 - **`liblp.so` is byte-identical in all seven regional v65 firmwares** (default/US, EU, AU, CN, JP, RU, TW). The
   installer requires its md5 to be `e39b358c5b0948933f49fd3099f81114`.
@@ -135,18 +182,18 @@ They do not touch the region-specific player program, the part that differs betw
 
 | Firmware | Status |
 |---|---|
-| RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles) |
-| USA-region player (v65) | Dolby Vision fix supported since v1.3.1 (USA driver build). One user with jb_overlay confirmed P8.1 and P7 MEL MKVs in Dolby Vision with a pre-release; the v1.3.1 seek fixes are not yet confirmed on a USA player. Subtitle improvements need the RU player program |
+| RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles + factory menu) |
+| USA-region player (v65) | Dolby Vision fix supported since v1.3.1 (USA driver build). **Confirmed by a user with v1.3.1 and jb_overlay**: P7 MEL and FEL MKVs with fast-forward, rewind, chapter skips both ways and playing to the end, P8.1, and the uninstaller. Subtitle improvements and factory menu: not available without jb_overlay yet (different player program, see [Better subtitles](#better-subtitles)) |
 | Third driver build (data +0x50, `check` reports `driver data+0x50`) | Dolby Vision fix supported since v1.3.1, checked against a driver dump; **untested on a player** |
-| Any of the above with **jb_overlay** (themes) | Dolby Vision fix: chains to the overlay. Subtitle improvements: not installed |
-| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes (it then reports the driver's data offset); **untested**, at your own risk. Subtitle improvements are skipped |
+| Any of the above with **jb_overlay** (themes) | Dolby Vision fix: chains to the overlay. Subtitle improvements: not installed. Factory menu: installed with jb_overlay V3 (checked against its player program, **untested on a player**) |
+| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes (it then reports the driver's data offset); **untested**, at your own risk. Subtitle improvements and factory menu are skipped |
 | Any other firmware version (for example v60), stock firmware, UDP-205 | not supported: the installer refuses |
 
 ### Checking a player without installing anything
 
 Use `oppo-dv-mkv-vX.Y.Z-check.zip` exactly like the installer (see [Install](#install)). It **changes nothing**:
 it only writes a report to `oppo-dv-mkv.log` on the stick, ending with `VERDICT: COMPATIBLE` or
-`VERDICT: NOT COMPATIBLE` and the reason. If the video driver check fails, the report adds `driver:` lines (the
+`VERDICT: NOT COMPATIBLE` and the reason, and `oppo-dv-mkv-result.txt` with one line per part (yes, or no and why). If the video driver check fails, the report adds `driver:` lines (the
 instructions that differ and where the driver keeps its data), which often show whether the fix can be ported without
 a driver dump. If you try a jailbreak other than RU 65-0131, please share the report (it contains md5s and kernel
 information, no personal data) by opening an issue.
@@ -175,22 +222,29 @@ privately.
 
    | File | Installs |
    |---|---|
-   | `oppo-dv-mkv-vX.Y.Z-full.zip` | Dolby Vision MKV fix **and** better subtitles (recommended on RU 65-0131) |
-   | `oppo-dv-mkv-vX.Y.Z-mkv-only.zip` | Dolby Vision MKV fix only (use this with jb_overlay, or if you want the stock subtitles) |
-   | `oppo-dv-mkv-vX.Y.Z-subtitles-only.zip` | better subtitles only (RU 65-0131 player program) |
+   | `oppo-dv-mkv-vX.Y.Z-full.zip` | Dolby Vision MKV fix + better subtitles + factory menu shortcut |
+   | `oppo-dv-mkv-vX.Y.Z-mkv-subtitles.zip` | Dolby Vision MKV fix + better subtitles |
+   | `oppo-dv-mkv-vX.Y.Z-mkv-only.zip` | Dolby Vision MKV fix only |
+   | `oppo-dv-mkv-vX.Y.Z-subtitles-only.zip` | better subtitles only |
+   | `oppo-dv-mkv-vX.Y.Z-factory-menu-only.zip` | factory menu shortcut only |
+
+   Every part is checked on its own (see [Compatibility](#compatibility)). A part that cannot be installed safely on
+   your player is skipped, and the others are still installed.
 2. Unzip it to the **root** of a FAT32 USB stick. You should see `AutoScript/` and `README.txt` at the top level of
    the stick.
 3. Power the player **off**. Plug the stick into the **rear** USB port, and make sure no other USB storage is
    connected. Power the player **on**.
    - At boot the player runs `AutoScript/install.sh` from the stick. It takes a second or two.
 4. When the home menu has been up for about 30 seconds, power the player **off** and remove the stick.
-5. (Optional) On a PC, open `oppo-dv-mkv.log` in the root of the stick. It should contain a line starting with
-   **`INSTALLED`**. If it says **`FAILED`**, the reason is on that line, and nothing was activated.
+5. (Optional) On a PC, open **`oppo-dv-mkv-result.txt`** in the root of the stick. Its first line says
+   **`INSTALLED`** or **`FAILED`**, then one line per part: `installed`, `NOT installed` with the reason, or
+   `not in this zip`. `FAILED` means nothing could be installed, and nothing was changed. The full log is
+   `oppo-dv-mkv.log`.
 6. Power the player **on**. From now on the fix is applied automatically at every boot.
 
 The installer also works as an updater: running a newer release the same way replaces the files. You can switch
-between the three options at any time by running another one: it installs what is in that zip and removes the part
-that is not.
+between the options at any time by running another one: it installs what is in that zip and removes the parts that
+are not.
 
 ## Uninstall and emergency off switch
 
@@ -389,6 +443,23 @@ it decoded the empty message as a picture with no data address, and the kernel t
 of the stream, as the missing command would have. The enhancement layer then finishes like the base layer, and at
 the end of the film the player returns to the file list.
 
+### 10. Freezes and green strips on UHD Blu-ray discs (v1.4.0)
+
+**Symptom:** with v1.3.1 installed, Dolby Vision UHD Blu-ray discs and ISOs could freeze after a chapter skip,
+fast-forward or rewind (the player had to be switched off with the power button). The looping Dolby Vision video
+of some disc menus showed green strips. Without oppo-dv-mkv the same discs played fine.
+
+**Cause:** the firmware plays Dolby Vision in one of two modes. MKV and TS files carry both layers in **one** video
+track (single-stream mode, the one this project fixes). Blu-ray discs carry them in **two** separate streams
+(dual-stream mode, which already worked). The hooks added in v1.3.1 for fixes 8 and 9, and the stop hook of fix 6,
+did not check which mode was active, so they also ran during disc playback. One of them resets the decoder's shared
+multi-core block before the enhancement layer's first picture. On a disc the base layer can be decoding at that
+moment; the reset cut its picture short (green strips), and when the picture never finished, playback froze.
+
+**Fix:** each of these hooks now reads the mode the firmware stores for the decoder (`fgIsSingle`) and does nothing
+unless it is single-stream Dolby Vision. Discs, BDMV folders and dual-stream content play exactly as on stock
+firmware again.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -473,6 +544,31 @@ passes when the decoders keep running.
 | MEL and FEL film, played to the end | decoder crash on the last frame, every time (v1.2.0 too) | playback ends, back to the file list |
 | Starting a film right after another one played to the end | nothing played until a restart | plays normally |
 
+### UHD Blu-ray discs (v1.4.0)
+
+Dolby Vision UHD Blu-ray ISOs played from a network share, with chapter skips both ways, fast-forward and rewind.
+Kernel counters showed whether any hook ran.
+
+| Test | v1.3.1 | v1.4.0 |
+|---|---|---|
+| Disc A (FEL), menu with looping Dolby Vision video | green strips in the menu | clean |
+| Disc A, 11 chapter skips + 5 fast-forward/rewind rounds | no freeze this time, hooks ran at every skip | — |
+| Disc B (the title of the original freeze report), chapter skips | froze (tester's report) | fine |
+| Discs A, B, C, D: menus and chapter skips | multi-core reset ran about 11 times per decoder restart | no hook ran at all |
+| P7 MEL MKV after the change: chapter skips and stop | — | seek fixes and stop hook still active, all fine |
+
+### Installer and factory menu (v1.4.0)
+
+| Test | Result |
+|---|---|
+| Installer, offline (busybox, fake `/mnt/ubi_boot`): RU program full zip, then switching to mkv-subtitles and factory-menu-only, then uninstall | each zip installs its parts and removes the others; uninstall removes everything |
+| ... jb_overlay V3 player: full zip, then uninstall | Dolby Vision fix + factory menu installed and chained, subtitles skipped with the reason; uninstall restores the overlay's boot script |
+| ... USA program without overlay: full zip / factory-menu-only zip | Dolby Vision fix only, the two others skipped with the reason / `FAILED`, nothing changed |
+| ... unknown driver build, unsupported firmware, boot hook of another mod, launcher without the hook | Dolby Vision fix skipped / `FAILED` with the reason, nothing changed |
+| ... check zip on a supported and an unsupported player | report and per-part result, nothing changed |
+| Installer and check zip on the RU development player (into a scratch folder instead of `/mnt/ubi_boot`) | all three parts pass their checks and install |
+| Factory menu shortcut on the RU development player: Gapless Playback + 0 0 0 0 | the Factory Page opens; on/off/on cycles of the patch |
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -499,14 +595,15 @@ program if that file exists. The installer puts there:
 
 ```
 /mnt/ubi_boot/bdpprog                 boot wrapper with the fail-safes; starts the patcher, then the real player
-/mnt/ubi_boot/oppo-dv-mkv/dvmkv.sh    waits for the player, applies both patches, marks the boot healthy
+/mnt/ubi_boot/oppo-dv-mkv/dvmkv.sh    waits for the player, applies the installed patches, marks the boot healthy
 /mnt/ubi_boot/oppo-dv-mkv/dvhook.sh   liblp.so patch   (on|off|status)
 /mnt/ubi_boot/oppo-dv-mkv/p7kel.sh    kernel patch     (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (RU 65-0131 player program only)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
+/mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (RU 65-0131 or jb_overlay V3 player program; on|off|status)
 ```
 
-Before writing a single byte, both patchers verify every patch site: the exact original instructions must be in
+Before writing a single byte, every patcher verifies every patch site: the exact original instructions must be in
 place, and for the kernel patch the driver fingerprint must match and the unused code area it occupies must match
 the original by md5. On any mismatch
 they do nothing. The installer refuses to overwrite an existing `/mnt/ubi_boot/bdpprog` that belongs to another
@@ -521,7 +618,7 @@ nix shell nixpkgs#zig nixpkgs#lld nixpkgs#llvm nixpkgs#zip -c ./mkrelease.sh   #
 ```
 
 `mkrelease.sh` compiles both patch blobs (`src/liblp`, `src/kernel`), generates the on-device patchers
-(`mkinstall.py`, `mkkinst.py`) and builds both release zips into `dist/`. The builds are reproducible: the md5 of
+(`mkinstall.py`, `mkkinst.py`) and builds the release zips into `dist/`. The builds are reproducible: the md5 of
 each blob is printed. No firmware files are needed or included.
 
 ## Credits
@@ -533,6 +630,17 @@ each blob is printed. No firmware files are needed or included.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
 
 ## Changelog
+
+- **v1.4.0: recommended update for everyone on v1.3.1.**
+  - **Fixed freezes and green strips on Dolby Vision UHD Blu-ray discs and ISOs** (fix 10). The seek, end-of-file
+    and stop hooks of v1.3.1 also ran during disc playback; they now act only on single-stream Dolby Vision (MKV and
+    TS). Discs play exactly as on stock firmware again. MKV playback is unchanged from v1.3.1.
+  - **New: factory menu shortcut.** Setup > Playback Setup, Gapless Playback highlighted, 0 0 0 0 opens Oppo's hidden
+    Factory Page (see [Factory menu](#factory-menu) and its warnings). RU 65-0131 and jb_overlay V3 player programs.
+  - **The installer checks each part on its own**, installs the parts that can be installed safely and skips the
+    others. `oppo-dv-mkv-result.txt` on the stick says per part what was installed, or why not.
+  - **Five download options:** full (Dolby Vision + subtitles + factory menu), mkv-subtitles (the old "full"),
+    mkv-only, subtitles-only, factory-menu-only.
 
 - **v1.3.1: recommended update for everyone.** (v1.3.0 was a test build for one USA-region tester and was not
   published.)

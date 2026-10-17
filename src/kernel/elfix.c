@@ -31,6 +31,8 @@
  * 12. eos_stub  fgVDecRetrieveEsIsPic (second cave, entry.S): the EL decoder's last ES message at the end of the file
  *               is empty (no read pointer) and comes without the end-of-stream command; it was decoded as a picture
  *               at address 0 and the decoder thread crashed. Such a message now sets the EOS flag.
+ * Since v1.4.0 hooks 4 and 8-12 act only in single-stream DV (stream info fgIsSingle, +0x650ac): UHD Blu-ray uses
+ * the firmware's own dual-stream path, where the multi-core reset cut base-layer pictures short.
  *
  * Some struct fields below are left over from development; the layout is kept so the counters stay where the
  * installer's "status" output expects them. */
