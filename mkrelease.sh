@@ -32,7 +32,7 @@ mk oppo-dv-mkv-$V-subtitles-only.zip subs            # better subtitles only
 mk oppo-dv-mkv-$V-factory-menu-only.zip menu         # factory menu shortcut only
 mk oppo-dv-mkv-$V-uninstall.zip "dv subs menu" UNINSTALL
 mk oppo-dv-mkv-$V-check.zip "dv subs menu" CHECKONLY
-T=dist/stage; rm -rf $T; mkdir -p $T; cp -r installer/dump/AutoScript installer/dump/README.txt $T/   # read-only driver dump
-(cd $T && zip -qrX ../oppo-dv-mkv-driver-dump.zip .); rm -rf $T
+T=dist/stage; rm -rf $T; mkdir -p $T; cp -r installer/dump/AutoScript installer/dump/README.txt $T/   # read-only full dump
+(cd $T && zip -qrX ../oppo-dv-mkv-full-dump.zip .); rm -rf $T
 (cd dist && sha256sum *.zip > SHA256SUMS)
 ls -l dist; cat dist/SHA256SUMS

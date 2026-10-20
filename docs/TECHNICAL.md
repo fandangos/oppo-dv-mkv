@@ -105,8 +105,8 @@ elsewhere:
 | USA | +0x90 | `vCheckEDID` (HDMI EDID handling) moves code from `0x7ebbbe30` on by 0x30 |
 | third build (region unknown) | +0x50 | HDMI audio input handling (`u1UpdateHdmiIecInput`) and later functions move code from `0x7eb83cb0` on |
 
-Everything the patch hooks or calls lies below `0x7eb83cb0`. Each port was checked against a full driver dump
-(`oppo-dv-mkv-driver-dump.zip`) by classifying every differing word in the shared code range: all are pointer,
+Everything the patch hooks or calls lies below `0x7eb83cb0`. Each port was checked against a driver dump
+(`oppo-dv-mkv-driver-dump.zip`, now part of `oppo-dv-mkv-full-dump.zip`) by classifying every differing word in the shared code range: all are pointer,
 branch or `movw` relocations, and the code caves hold the same original bytes.
 
 `p7kel.sh` ships one blob, built for the RU layout, and moves its data addresses by D when it writes it: 9 words, 3

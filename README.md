@@ -97,9 +97,9 @@ colour squares that ship with this project; no firmware file is distributed.
 player from another region: its stock player program (`/usr/local/bin/bdpprog.1`) is different too, so the installer
 still skips them. The patch changes a few fixed places in the player program (colour table, glyph rendering flags,
 outline width), and the library part (`liblp.so`) is already identical in every region, so it can probably be ported
-to other player programs. If you want the better subtitles on your player, open an issue with the md5 from the check
-report (`bdpprog.1` and `running`) and share these files privately, like the driver dump: `/usr/local/bin/bdpprog.1`
-and, with jb_overlay, the copy it runs, `/mnt/ubi_boot/jb_overlay/bdp/bdpprog.1`. With jb_overlay the colour squares
+to other player programs. If you want the better subtitles on your player, make a
+[full dump](#helping-to-support-another-firmware-full-dump) and share it privately: it has the player program your
+player really runs, with or without jb_overlay. With jb_overlay the colour squares
 in the subtitle menu would probably stay unchanged, because the overlay's theme has its own images.
 
 ## Factory menu
@@ -198,23 +198,34 @@ instructions that differ and where the driver keeps its data), which often show 
 a driver dump. If you try a jailbreak other than RU 65-0131, please share the report (it contains md5s and kernel
 information, no personal data) by opening an issue.
 
-### Helping to support another firmware (driver dump)
+### Helping to support another firmware (full dump)
 
-If the check fails with `module fingerprint mismatch` or `unknown driver build`, the patch has to be ported to your
-driver build. Porting needs a
-copy of that driver. `oppo-dv-mkv-driver-dump.zip` (on the release page) makes one. It is **read-only**: it copies the
-loaded `bdpdrv1` driver from memory to the stick, plus a short `info.txt` (kernel and firmware versions, md5s of the
-player program and `liblp.so`, the loaded modules), and writes nothing to the player.
+If the check or the installer says a part is not supported on your player (`module fingerprint mismatch`,
+`unknown driver build`, a player program other than RU 65-0131, jb_overlay with its own player program, another
+firmware version), that part has to be ported to your firmware. `oppo-dv-mkv-full-dump.zip` (on the release page) collects
+everything needed for all parts in one go, with or without jb_overlay, and with or without oppo-dv-mkv installed.
+It is **read-only**: it writes nothing to the player and installs nothing. It copies to the stick:
 
-1. Copy the contents of the zip to the root of a FAT32 stick with at least 20 MB free.
+- the player program that is actually running (found by what it loads, so the jb_overlay copy is found too) and the
+  libraries it uses, but only the ones the project does not have yet (checked by md5);
+- the `bdpdrv1`, `bdpdrv` and `splitter` video drivers, copied from memory with their symbols;
+- the boot setup (jailbreak launcher, `/mnt/ubi_boot` boot hook, jb_overlay scripts), kernel and firmware versions;
+- the subtitle menu image the player really uses (also a jb_overlay theme's) and the subtitle font;
+- a list of every system file with its md5.
+
+No personal data: no network settings, passwords or keys, no jb_overlay `config.ini` / `autostart.sh` / rclone / ssh
+files, no Blu-ray storage (BUDA/APDA), no network share mounts.
+
+1. Copy the contents of the zip to the root of a FAT32 stick with at least 200 MB free.
 2. Power the player off, plug the stick into the rear USB port, power it on.
-3. Wait 5 minutes after the home menu appears (the copy takes about 30 seconds and runs in the background), then
-   power off and remove the stick.
+3. Leave it on the home menu for 5 minutes (the dump takes about a minute in the background), then power off and
+   remove the stick.
 4. `oppo-dv-mkv-dump.log` on the stick must end with a line starting with `DONE`.
-5. Delete the `AutoScript` folder from the stick, so the dump does not run again at every boot.
+5. Send `oppo-dv-mkv-dump.tar.gz` from the stick (usually 5 to 30 MB).
+6. Delete the `AutoScript` folder from the stick, so the dump does not run again at every boot.
 
-The dump is Oppo's own driver code: **do not post it publicly**. Open an issue saying you have one, and share it
-privately.
+The dump contains Oppo's own program code: **do not post it publicly**. Open an issue saying you have one, and share
+it privately.
 
 ## Install
 
@@ -641,6 +652,8 @@ each blob is printed. No firmware files are needed or included.
     others. `oppo-dv-mkv-result.txt` on the stick says per part what was installed, or why not.
   - **Five download options:** full (Dolby Vision + subtitles + factory menu), mkv-subtitles (the old "full"),
     mkv-only, subtitles-only, factory-menu-only.
+  - Added later: read-only **full dump** zip (`oppo-dv-mkv-full-dump.zip`), which replaces the driver dump. One dump
+    has everything needed to port every part to another firmware, region or jb_overlay setup.
 
 - **v1.3.1: recommended update for everyone.** (v1.3.0 was a test build for one USA-region tester and was not
   published.)
