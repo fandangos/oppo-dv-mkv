@@ -88,19 +88,22 @@ improves this, at every boot and in RAM only:
 | Subtitle colour menu | — | the colour squares show the new colours |
 
 Pick the colours in the player's subtitle settings as usual. These changes were tested on the development player
-(the same RU 65-0131 jailbreak) together with the Dolby Vision fix. The subtitle part needs the RU 65-0131 player program,
-the region-specific part of the firmware. On any other jailbreak the installer skips it automatically, and the Dolby
-Vision fix is unaffected. The menu colour squares are rebuilt **on the player** from its own image file plus 8 small
-colour squares that ship with this project; no firmware file is distributed.
+(the same RU 65-0131 jailbreak) together with the Dolby Vision fix. The menu colour squares are rebuilt **on the
+player** from its own image file plus 8 small colour squares that ship with this project; no firmware file is
+distributed.
 
-**Other regions and jb_overlay.** Removing or disabling jb_overlay does not bring the subtitle improvements to a
-player from another region: its stock player program (`/usr/local/bin/bdpprog.1`) is different too, so the installer
-still skips them. The patch changes a few fixed places in the player program (colour table, glyph rendering flags,
-outline width), and the library part (`liblp.so`) is already identical in every region, so it can probably be ported
-to other player programs. If you want the better subtitles on your player, make a
-[full dump](#helping-to-support-another-firmware-full-dump) and share it privately: it has the player program your
-player really runs, with or without jb_overlay. With jb_overlay the colour squares
-in the subtitle menu would probably stay unchanged, because the overlay's theme has its own images.
+**Other regions and jb_overlay.** The player program (`bdpprog.1`) is the region-specific part of the firmware: the
+places the patch changes move a little from region to region. They were located in the player program of every
+regional v65 firmware (RU, EU, AU, CN, TW, JP and US/default) and in the Cambridge Audio CXUHD firmware 66-0614, so
+the patch carries one *layout* per program family. A jailbreak or jb_overlay copy of a regional program keeps that
+region's layout; the USA jailbreak's player program is the RU 65-0131 one with a few jailbreak changes, so it uses
+the RU layout. On the player, the patch picks the
+layout whose fingerprints (md5 of the patched code and data) match the running program, wherever it runs from, and
+checks every place before writing; a program that matches no layout is skipped with the reason, and the Dolby Vision
+fix is unaffected. **Only the RU program has been tested on a real player so far**; the other layouts were checked
+offline against the regional programs and the programs from testers' dumps (see [Tests](#tests)). With the jb_overlay dark theme, the colour squares in
+the subtitle menu keep the theme's colours (the subtitles themselves change). If your player is skipped, make a
+[full dump](#helping-to-support-another-firmware-full-dump) and share it privately.
 
 ## Factory menu
 
@@ -130,9 +133,16 @@ Opening the page runs Oppo's own code, unchanged, and that code also does two th
 How it works: the page's trigger in the player program waits, with Gapless Playback highlighted, for the factory
 keys F3, F5 and F11. The shortcut replaces these three keys by the digit 0, in place (5 small edits, in RAM, at every
 boot): the first 0 arms the trigger, three more open the page, any other key cancels. Nothing else changes.
-It needs the exact player program it was made for: the RU 65-0131 free jailbreak (`49b649bd…`), or the copy of it
-that **jb_overlay V3** runs (`82e04bcf…`, the same program with 40 bytes changed for the theme, none of them near
-the trigger). On any other player program the installer skips it and writes why in `oppo-dv-mkv-result.txt`.
+Like the subtitle patch, it carries one layout per regional v65 player program (RU, EU, AU, CN, TW, JP, US/default;
+in the US program the trigger code is laid out differently, so the arming branch is re-encoded for it) and picks the
+one matching the running program, jailbroken or run by jb_overlay. Tested on a real player only with the RU program.
+On a program that matches no layout the installer skips it and writes why in `oppo-dv-mkv-result.txt`.
+
+**Cambridge Audio CXUHD:** its firmware (66-0614) still has Oppo's older trigger, which takes normal remote keys, so
+there is nothing to install: **Setup > Playback Setup, cursor on the second item, then BLUE, 2, 4, 5, 8** (BLUE
+arms it, the last four digits must be 2 4 5 8, any other key cancels). The installer recognises this code and
+reports `Factory menu shortcut: not needed` with these keys. This was found in the firmware and is **not yet tried on
+a real CXUHD**; the same warnings apply to the page.
 
 ## Requirements
 
@@ -151,8 +161,9 @@ The patches modify two pieces of Oppo's firmware:
 
 The Dolby Vision fix does not touch the region-specific player program, the part that differs between regions and
 between jailbreaks. The subtitle improvements and the factory menu shortcut do patch the player program, so they are
-installed only on the exact programs they were made for (checked by the md5 of the program that is running). Each
-part is checked on its own: the installer installs the parts that pass, skips the others and writes why.
+installed only on programs whose layout they know (checked by fingerprints of the patched code in the program that
+is running). Each part is checked on its own: the installer installs the parts that pass, skips the others and
+writes why.
 
 - **`liblp.so` is byte-identical in all seven regional v65 firmwares** (default/US, EU, AU, CN, JP, RU, TW). The
   installer requires its md5 to be `e39b358c5b0948933f49fd3099f81114`.
@@ -167,8 +178,9 @@ part is checked on its own: the installer installs the parts that pass, skips th
 
   Unlike `liblp.so`, the driver comes from a region-specific, encrypted part of the firmware. Since v1.3.1, **driver
   builds that differ only in where their global data sits are supported**: the patcher measures that offset on the
-  player and moves the patch's few data addresses by it. Three builds were checked against driver dumps: RU 65-0131
-  (offset 0), USA (+0x90) and a third build of unknown region (+0x50). In each, the hook sites, the code caves and
+  player and moves the patch's few data addresses by it. Four builds were checked against driver dumps: RU 65-0131
+  (offset 0), USA (+0x90), a third build of unknown region (+0x50) and the Cambridge Audio CXUHD 66 (−0x8). In each,
+  the hook sites, the code caves and
   every instruction the patch relies on are identical; their real code changes (HDMI handling) are in parts the patch
   does not touch. A driver whose patched code differs fails the checks, and nothing is written.
 - **The jailbreak must start `/mnt/ubi_boot/bdpprog` at boot.** The installer never overwrites a
@@ -176,17 +188,19 @@ part is checked on its own: the installer installs the parts that pass, skips th
   patcher sees unexpected bytes and does nothing.
 - **jb_overlay** (the overlay mod with themes such as *Dark Space*, ssh and telnet) is recognised. Its boot script is
   kept as `/mnt/ubi_boot/bdpprog.prev`: at boot, oppo-dv-mkv starts first and then hands over to the overlay, which
-  keeps working as before. Uninstalling puts the overlay's script back. The subtitle improvements are not installed
-  with the overlay, because it runs its own copy of the player program and its own theme images. Reinstalling the
+  keeps working as before. Uninstalling puts the overlay's script back. The subtitle improvements and the factory menu
+  patch the overlay's own copy of the player program; with its dark theme the colour squares in the subtitle menu
+  keep the theme's colours. Reinstalling the
   overlay simply switches the Dolby Vision fix off until you install oppo-dv-mkv again.
 
 | Firmware | Status |
 |---|---|
 | RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles + factory menu) |
-| USA-region player (v65) | Dolby Vision fix supported since v1.3.1 (USA driver build). **Confirmed by a user with v1.3.1 and jb_overlay**: P7 MEL and FEL MKVs with fast-forward, rewind, chapter skips both ways and playing to the end, P8.1, and the uninstaller. Subtitle improvements and factory menu: not available without jb_overlay yet (different player program, see [Better subtitles](#better-subtitles)) |
+| USA-region player (v65) | Dolby Vision fix supported since v1.3.1 (USA driver build). **Confirmed by a user with v1.3.1 and jb_overlay**: P7 MEL and FEL MKVs with fast-forward, rewind, chapter skips both ways and playing to the end, P8.1, and the uninstaller. Subtitle improvements and factory menu (since v1.5.0): the USA jailbreak runs the RU 65-0131 player program with a few jailbreak changes, so the RU layout applies (checked offline on dumps from several USA players); a stock US program gets the US layout; **untested on a USA player** |
+| Cambridge Audio CXUHD (firmware 66-0614, jailbroken) | Dolby Vision fix: its driver (data −0x8) is recognised; **confirmed by a user with v1.4.0** (MKV Dolby Vision plays). Subtitle improvements: CXUHD layout (since v1.5.0), checked offline, **untested on a player**. Factory menu: nothing to install, its own code opens the page with BLUE 2 4 5 8 (see [Factory menu](#factory-menu)) |
 | Third driver build (data +0x50, `check` reports `driver data+0x50`) | Dolby Vision fix supported since v1.3.1, checked against a driver dump; **untested on a player** |
-| Any of the above with **jb_overlay** (themes) | Dolby Vision fix: chains to the overlay. Subtitle improvements: not installed. Factory menu: installed with jb_overlay V3 (checked against its player program, **untested on a player**) |
-| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes (it then reports the driver's data offset); **untested**, at your own risk. Subtitle improvements and factory menu are skipped |
+| Any of the above with **jb_overlay** (themes) | Dolby Vision fix: chains to the overlay. Subtitle improvements and factory menu: patch the overlay's copy of the player program (jb_overlay V3 runs the RU program), **untested on a player**; with the dark theme the subtitle menu squares keep the theme's colours |
+| Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes (it then reports the driver's data offset); **untested**, at your own risk. Subtitle improvements and factory menu: installed when the program matches one of the known layouts (RU, EU, AU, CN, TW, JP, US, CXUHD), otherwise skipped |
 | Any other firmware version (for example v60), stock firmware, UDP-205 | not supported: the installer refuses |
 
 ### Checking a player without installing anything
@@ -201,7 +215,7 @@ information, no personal data) by opening an issue.
 ### Helping to support another firmware (full dump)
 
 If the check or the installer says a part is not supported on your player (`module fingerprint mismatch`,
-`unknown driver build`, a player program other than RU 65-0131, jb_overlay with its own player program, another
+`unknown driver build`, a player program that matches no known layout, jb_overlay with its own player program, another
 firmware version), that part has to be ported to your firmware. `oppo-dv-mkv-full-dump.zip` (on the release page) collects
 everything needed for all parts in one go, with or without jb_overlay, and with or without oppo-dv-mkv installed.
 It is **read-only**: it writes nothing to the player and installs nothing. It copies to the stick:
@@ -248,12 +262,14 @@ it privately.
    - At boot the player runs `AutoScript/install.sh` from the stick. It takes a second or two.
 4. When the home menu has been up for about 30 seconds, power the player **off** and remove the stick.
 5. (Optional) On a PC, open **`oppo-dv-mkv-result.txt`** in the root of the stick. Its first line says
-   **`INSTALLED`** or **`FAILED`**, then one line per part: `installed`, `NOT installed` with the reason, or
-   `not in this zip`. `FAILED` means nothing could be installed, and nothing was changed. The full log is
-   `oppo-dv-mkv.log`.
+   **`INSTALLED`** or **`FAILED`**, then one line per part: `installed`, `NOT installed` with the reason,
+   `not needed` with the reason, or `not in this zip`. `FAILED` means nothing could be installed, and nothing was
+   changed (`NOTHING TO INSTALL`: the player does not need what is in this zip, nothing was changed). The full log
+   is `oppo-dv-mkv.log`.
 6. Power the player **on**. From now on the fix is applied automatically at every boot.
 
-The installer also works as an updater: running a newer release the same way replaces the files. You can switch
+The installer also works as an updater: running a newer release the same way replaces the files (it updates any
+earlier version in place, also one chained to jb_overlay, and resets the fail-safe counters). You can switch
 between the options at any time by running another one: it installs what is in that zip and removes the parts that
 are not.
 
@@ -262,7 +278,9 @@ are not.
 - **Uninstall:** download `oppo-dv-mkv-vX.Y.Z-uninstall.zip` and use it exactly like the installer. The log should
   say **`UNINSTALLED`**. After the next power cycle the player behaves as before the install.
 - **Built-in fail-safes:** the boot wrapper switches the patches off by itself and boots a stock player:
-  - if two boots in a row never reach a healthy state, which the patcher marks 90 seconds after start; or
+  - if two boots in a row never reach a healthy state, which the patcher marks 90 seconds after start, the next boot
+    runs without patches and the one after it tries them again (so switching the player off twice within 90 seconds
+    of power-on does not switch them off for good; `wrapper.log` says `patches skipped for this boot`); or
   - if the player program crashes within 120 seconds of a patched start. In this case it reboots once with the
     patches disabled.
 - Logs on the player: `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` and `wrapper.log`.
@@ -578,6 +596,22 @@ Kernel counters showed whether any hook ran.
 | ... unknown driver build, unsupported firmware, boot hook of another mod, launcher without the hook | Dolby Vision fix skipped / `FAILED` with the reason, nothing changed |
 | ... check zip on a supported and an unsupported player | report and per-part result, nothing changed |
 | Installer and check zip on the RU development player (into a scratch folder instead of `/mnt/ubi_boot`) | all three parts pass their checks and install |
+
+### Regional layouts for subtitles and factory menu (v1.5.0)
+
+| Test | Result |
+|---|---|
+| `src/porting/findsites.py` on the 7 stock v65 player programs, the RU jailbreak one, the jb_overlay V3 one, the USA jailbreak one and the Cambridge CXUHD 66 one (the last two from testers' full dumps) | every place found and checked in all 11; 8 subtitle layouts (the RU jailbreak, jb_overlay and USA jailbreak programs share the RU one) and 7 factory-menu layouts; in the CXUHD program the older stock trigger (BLUE, then 2 4 5 8) is recognised and decoded, nothing to patch |
+| `subs.sh` / `fpage.sh` on each of the 9 programs, simulated (the program file as `/proc/PID/exe`, its segments and `liblp.so` in a fake `/proc/PID/mem`) | right layout chosen, everything patched; second run reports "already"; factory menu on/off restores the original bytes; the patched arming branch lands on the arming instruction and the key pattern points at a read-only "$$$" |
+| ... a program with one byte changed inside a patched function, unexpected colour tables, unexpected bytes at a place | refused or skipped, nothing written |
+| ... a program with a byte changed elsewhere (another jailbreak build of the same region) | still recognised |
+| ... CXUHD program: `fpage.sh` check / status / on / off | "not needed" with the keys, exit code 2, nothing written; with one byte changed in its trigger code, arming key or digit pattern: no known layout |
+| On the RU development player: `check`, subtitle patch over the already patched player, factory menu off/on | layout RU; "already patched" for every part (nothing written); off/on agrees with the installed v1.4.0 script |
+| Installer, offline: the v1.4.0 scenarios plus a US-layout player and a player with no known layout; check zip on the RU development player | all pass |
+| Installer, offline: USA jailbreak player; CXUHD with the full zip (DV + subtitles, menu "not needed", no "skipped" note), the factory-menu-only zip (`NOTHING TO INSTALL`, nothing changed) and the check zip; an installer started twice in one boot | all pass (23 scenario steps with the boot wrapper test below) |
+| Boot wrapper, offline: fresh boot, two short boots, the boot after them, a player crash right after start, disabled | patches / patches / skipped once and the counter cleared / patches again / disabled + reboot / no patches |
+| Full dump, offline (RU and unknown-overlay scenarios), and started twice in one boot | all checks pass; oppo-dv-mkv's own boot wrapper is named as such; the second start only logs that a dump is already running |
+| On the RU development player (busybox, everything in a scratch folder in RAM): `subs.sh` / `fpage.sh` check, subtitles over the patched player, factory menu off/on; both scripts on the CXUHD program as a fake process; the installer's check, full and repeated runs for RU, and full, factory-menu-only and check runs for the CXUHD program; the boot wrapper fail-safes; the dump started twice | layout RU, "already" everywhere, off/on OK; CXUHD layout and "not needed" with the keys (exit 2); every installer result as in the offline test, the repeated run did nothing; wrapper and dump lock as offline; `/mnt/ubi_boot` untouched |
 | Factory menu shortcut on the RU development player: Gapless Playback + 0 0 0 0 | the Factory Page opens; on/off/on cycles of the patch |
 
 ### Final regression run (persistent install, fresh boot)
@@ -609,9 +643,9 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/dvmkv.sh    waits for the player, applies the installed patches, marks the boot healthy
 /mnt/ubi_boot/oppo-dv-mkv/dvhook.sh   liblp.so patch   (on|off|status)
 /mnt/ubi_boot/oppo-dv-mkv/p7kel.sh    kernel patch     (on|off|status|check)
-/mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (RU 65-0131 player program only)
+/mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
-/mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (RU 65-0131 or jb_overlay V3 player program; on|off|status)
+/mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
 ```
 
 Before writing a single byte, every patcher verifies every patch site: the exact original instructions must be in
@@ -641,6 +675,30 @@ each blob is printed. No firmware files are needed or included.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
 
 ## Changelog
+
+- **v1.5.0: recommended update for everyone on v1.4.0 (and older).**
+  - **Subtitle improvements and factory menu for every regional v65 player program** (RU, EU, AU, CN, TW, JP,
+    US/default), jailbroken or run by jb_overlay: one layout per region, chosen on the player by fingerprints of the
+    patched code, every place checked before it is written. jb_overlay players get the subtitle improvements too.
+    Only the RU program is tested on a real player.
+  - The installer asks the patches themselves (`subs.sh check`, `fpage.sh check`) instead of comparing the program's
+    md5 with a fixed list.
+  - `src/porting/`: the tools that locate the patch places in a player program and write the layout tables.
+  - **USA jailbreak players** get both: their player program is the RU 65-0131 one with a few jailbreak changes, so
+    the RU layout applies.
+  - **Cambridge Audio CXUHD (66-0614):** subtitle improvements (own layout). Its firmware still opens the Factory
+    Page with normal remote keys (Playback Setup, second item, BLUE 2 4 5 8), so the factory menu part reports
+    "not needed" with those keys and installs nothing. Its video driver (data −0x8) was already handled by v1.4.0,
+    confirmed by a user.
+  - **Fail-safe:** after two boots that never reached the healthy mark (for example the player switched off twice
+    within 90 seconds of power-on), the patches are skipped for one boot only and then tried again. Before, they
+    stayed off until the next install.
+  - The installer and the full dump run only once per boot. One player started the USB script twice (with a second
+    USB disk connected), and two runs at the same time could mix their files.
+  - Full dump: oppo-dv-mkv's own boot wrapper is no longer reported as jb_overlay.
+  - **Updating from v1.4.0:** run the v1.5.0 zip you want, the same way as the installer. The Dolby Vision fix is
+    unchanged from v1.4.0; the update brings the new boot wrapper (fail-safe), adds the parts your player now
+    supports, and keeps a jb_overlay chain as it is.
 
 - **v1.4.0: recommended update for everyone on v1.3.1.**
   - **Fixed freezes and green strips on Dolby Vision UHD Blu-ray discs and ISOs** (fix 10). The seek, end-of-file

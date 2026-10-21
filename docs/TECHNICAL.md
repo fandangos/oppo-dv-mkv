@@ -104,6 +104,7 @@ elsewhere:
 | RU 65-0131 | 0 | — |
 | USA | +0x90 | `vCheckEDID` (HDMI EDID handling) moves code from `0x7ebbbe30` on by 0x30 |
 | third build (region unknown) | +0x50 | HDMI audio input handling (`u1UpdateHdmiIecInput`) and later functions move code from `0x7eb83cb0` on |
+| Cambridge Audio CXUHD 66-0614 | −0x8 | HDMI video output (`vHDMIVideoOutput`) and later functions move code from `0x7ebc680c` on |
 
 Everything the patch hooks or calls lies below `0x7eb83cb0`. Each port was checked against a driver dump
 (`oppo-dv-mkv-driver-dump.zip`, now part of `oppo-dv-mkv-full-dump.zip`) by classifying every differing word in the shared code range: all are pointer,
@@ -114,7 +115,9 @@ literal pool words holding an address and 6 `movw` holding an address's low half
 since the `movt` would then change too). `build.sh` also compiles the blob with `-DDSHIFT=0x90`, `0x50` and `0x1000`.
 `mkkinst.py` finds the relocated words from the `0x1000` build, asserts that each is a data address inside an
 anchored object, and that relocating the RU blob by 0x90 / 0x50 / 0x1000 gives exactly the compiled blobs. `check`
-reports the build as `ru`, `us` or `data+0x..`.
+reports the build as `ru`, `us` or `data+0x..` / `data-0x..`. The CXUHD build was not compiled separately: v1.4.0
+measured D = −0x8 on a CXUHD and switched the fix on there (its log and dumped driver show every site patched; a user
+confirmed MKV Dolby Vision playback), and `ksim` check/off/on cycles on that dumped driver pass.
 
 It also checks:
 - `/proc/kallsyms`: `printk` at `0x803f7df0` and `jiffies` at `0x805760c0`;
@@ -309,10 +312,11 @@ flagged (one per file played to the end).
 
 The VDP0 sync timestamp, the clamp counters and the stop counter live further in the struct (see `elfix.c`).
 
-## Part 3: subtitles (`subs.sh`, RU 65-0131 player program only)
+## Part 3: subtitles (`subs.sh`)
 
-It is gated on the md5s of `bdpprog.1` (`49b649bd…`) and `liblp.so`. It writes into the running player through
-`/proc/<pid>/mem`.
+It is gated on the `liblp.so` md5 and on a layout of the running player program (see
+[Player program layouts](#player-program-layouts)). It writes into the running player through `/proc/<pid>/mem`.
+The addresses below are those of the RU program.
 
 | What | Where | Change |
 |---|---|---|
@@ -323,7 +327,8 @@ It is gated on the md5s of `bdpprog.1` (`49b649bd…`) and `liblp.so`. It writes
 | Outline preview colours | bdpprog `0x1238c80` | `B4`, `A0`, `88`, `68`, `48`, `000000` |
 | Outline (edge) width | liblp `0x584998` (5 instructions) + `0x584ad8` | 1 → 2 |
 
-Every instruction patch checks the expected original bytes first.
+Every instruction patch checks the expected original (or already patched) bytes first; the colour tables are written
+only when their md5 is the stock one (120 bytes of table + preview in bdpprog, 96 bytes of the liblp mirror).
 
 **Menu squares:** `image_bdp83.bin` is a container with a 282-entry index (`u16 w, u16 h, u32, u32, u32 size,
 u32 offset`, 20 bytes each, after a `u32` count). Entries 216..239 are the 56×30 subtitle-colour squares. The
@@ -356,10 +361,56 @@ trigger: the list's highlighted index (widget command `0x1000301d`) must be 1 (G
 | `0x8486a4` literal | `0x0123887a` (`{4,10}`) | `0x00fe77e5`: three `0x24` bytes (`'0' - 0xc`) in a read-only table |
 
 So the first 0 arms, the next three fill the buffer and match. F3 (`0x10028` after the change) can no longer arm it.
-The sites are the same in the RU 65-0131 program (`49b649bd`) and the jb_overlay V3 copy (`82e04bcf`: 40 bytes differ,
-`res` → `tmp` in five resource paths and a few `.text1` patches). `fpage.sh` finds the player by name, checks the md5
-of `/proc/<pid>/exe` and writes through `/proc/<pid>/mem`, after checking every site holds the original or the
-patched bytes.
+These are the RU addresses; the jb_overlay V3 copy (`82e04bcf`: 40 bytes differ, `res` → `tmp` in five resource paths
+and a few `.text1` patches) and the USA jailbreak's program (`a351825d`) have the same ones.
+
+**Older stock trigger (Cambridge CXUHD 66-0614, `FUN_00835374`):** the same page builder with the trigger Oppo used
+before: with index 1 highlighted, a digit `0x10030..0x10039` is shifted into a 4-byte buffer as `key - 0x30`
+(state `0x131f13c`: `+0xa9` armed, `+0xaa..0xad` buffer) once armed, key `0xbf003` (BLUE in the program's CLI key
+table) arms, any other key disarms, and the buffer is compared with `02 04 05 08` (`0x1212355`). So BLUE 2 4 5 8 opens
+the page with the normal remote and nothing is patched: `fpage.sh` names the keys and exits with 2, the installer
+reports the part as "not needed". `fpage.sh` finds the player by name, picks the layout of the running
+program and writes through `/proc/<pid>/mem`, after checking every site holds the original or the patched bytes.
+
+## Player program layouts
+
+The player program `bdpprog.1` is built per region; a jailbreak adds its own segment and a few patches but does not
+move code, so a jailbroken or jb_overlay copy has the layout of its stock regional program. Across the seven v65
+regional programs (RU, EU, AU, CN, TW, JP, US/default) the patched code moves by small amounts:
+
+- the glyph function is identical everywhere (`0x4cbfdc`);
+- the outline function moves (`0x8da27c` TW … `0x8da5bc` US);
+- the colour tables are at `0x1238c20` (RU, EU, AU, CN, TW) or `0x1241c20` (JP, US: data segment +0x9000);
+- the factory-menu trigger spells the region into the firmware version string (`movs r2,#'R'` …), so it differs by
+  two immediates between regions, and moves; in the US program extra code before the key compares shifts the first
+  literal pool, so its sites are not at one fixed distance from each other and the arming `beq.w` gets another
+  offset (`3ff4e3af` instead of `3ff4e2af`); the read-only `"$$$"` the key pattern pointer is moved to also differs.
+
+Two more programs come from testers' full dumps. The USA jailbreak's `bdpprog.1` (`a351825d`) is the RU 65-0131
+jailbreak program with 25 bytes changed, all in the jailbreak's own `.text1` (a check skipped and some feature tests
+removed), so it uses the RU layout. The Cambridge Audio CXUHD 66-0614 program (`35427c58`, no `.text1`) is an Oppo
+build of the same code base where everything moved: glyph flags `0x4c0924`, outline `0x8c1e7c`, colour tables
+`0x12126fc`; its factory-menu trigger is the older stock one (see Part 4), so it has a subtitle layout and an entry in
+`fpage.sh`'s `STOCK` table instead of a factory-menu layout.
+
+`src/porting/findsites.py` locates every place from the RU jailbreak program: whole functions (glyph, outline) or two
+short blocks (factory menu) are turned into patterns with every PC-relative field, call and `movw`/`movt` immediate
+wildcarded, searched in the target, and each site is then verified (original bytes, or decoded meaning: the F5 key
+literal, the arming `mov.w r3,#0`, the `beq.w` to the same exit as the block's `bne.w`, the `{4,10}` pattern
+behind the pointer). The arming branch is re-encoded for the target. When the two factory-menu blocks are missing,
+it looks for the older stock trigger block (`OLD_TRIG`, taken from the CXUHD program, PC-relative fields wildcarded)
+and decodes the arming key, the digit pattern and its length. `mklayouts.py` groups the programs by identical sites
+and fingerprints, per part (a factory-menu error does not drop a program's subtitle layout), and writes the
+`LAYOUTS` tables of `subs.sh` and `fpage.sh` and `fpage.sh`'s `STOCK` table (fingerprints of the trigger block, the
+arming-key literal and the digit pattern, then the keys); `regen.sh` runs both over the programs in `builds.txt` and
+fails if a program does not map completely.
+
+A layout line holds fingerprints (file offset, length, md5 in the program file) of everything it relies on: the two
+subtitle functions and the stock colour tables; the factory-menu blocks and the `"$$$"` bytes. On the player the
+scripts take the first layout whose fingerprints all match `/proc/<pid>/exe`, so a program changed inside a patched
+function matches nothing and is left alone, while one changed elsewhere (another jailbreak build) is still recognised.
+The AU program shows why the data fingerprints matter: its factory-menu code is byte-identical to RU's at the same
+address, but its read-only data is 8 bytes off, so only the `"$$$"` fingerprint keeps it from using the RU layout.
 
 ## Debugging tips (for developers)
 

@@ -6,7 +6,8 @@
 # /mnt/ubi_boot/bdpprog.prev and is run instead of the player (it starts its own copy of the player).
 # Fail-safes (each one leaves a stock player):
 #  - $D/disable exists                                          -> no patches
-#  - 2 boots in a row never reached "healthy" (dvmkv.sh clears $D/bootcount after 90 s) -> no patches
+#  - 2 boots in a row never reached "healthy" (dvmkv.sh clears $D/bootcount after 90 s) -> no patches for one boot,
+#    then they are tried again (two short boots, e.g. switched off within 90 s, must not disable them for good)
 #  - player dies abnormally within 120 s of a patched start     -> create $D/disable and reboot
 D=${OPPODV_D:-/mnt/ubi_boot/oppo-dv-mkv}
 PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
@@ -19,7 +20,8 @@ if [ ! -e $D/disable ]; then
   N=$(cat $D/bootcount 2>/dev/null); N=${N:-0}
   case "$N" in *[!0-9]*) N=9;; esac
   if [ "$N" -ge 2 ]; then
-    echo "boot $(date) bootcount=$N -> patches skipped" >> $D/wrapper.log
+    echo "boot $(date) bootcount=$N -> patches skipped for this boot" >> $D/wrapper.log
+    rm -f $D/bootcount; sync
   else
     echo $((N+1)) > $D/bootcount; sync
     MODS=1

@@ -27,10 +27,10 @@ PREV=$U/bdpprog.prev
 [ -f $S/oppo-dv-mkv/fpage.sh ] && MENU=1 || MENU=
 IN_DV=$DV; IN_SUBS=$SUBS; IN_MENU=$MENU   # what this zip contains (DV/SUBS/MENU become what gets installed)
 SQUARES="09 11 18 19 20 21 22 23"
-RU_PLAYER=49b649bdcffe8b611f1b7bbc0d9fa0b1   # RU 65-0131 player program (subtitle patches, factory menu)
-MENU_PLAYERS="$RU_PLAYER 82e04bcfc60a53892668ea325311b3a6"   # factory menu: RU 65-0131, and the jb_overlay V3 copy of it
 RESORIG=${OPPODV_RESORIG:-/mnt/rootfs_normal/res/image_bdp83.bin}
 exec >>$L 2>&1
+# once per boot: some players start AutoScript twice (e.g. with a second USB disk); two runs must not overlap
+mkdir ${OPPODV_LOCK:-/tmp/oppo-dv-mkv.lock} 2>/dev/null || { echo "=== installer already started during this boot, not again"; exit 0; }
 echo "=== oppo-dv-mkv $VERSION installer, $(date), uptime $(cut -d' ' -f1 /proc/uptime)s"
 # result file: one line per part, written at the end of every run (also on failure). *_R: the part's result
 DV_R=; SUBS_R=; MENU_R=; HEAD=
@@ -54,11 +54,15 @@ running(){ [ -n "$OPPODV_RUNMD5" ] && { echo $OPPODV_RUNMD5; return; }; p=$(ps |
 # --- supported firmware: Oppo UDP-203, jailbreak built on Oppo's v65 firmware ---
 # liblp.so is identical in every regional v65 firmware. The bdpdrv1 video driver is verified in memory by
 # p7kel.sh check (module address, original instructions at every hook, entry words, the driver's data offset measured
-# from pointers in its code, kernel symbols). Subtitles and the factory menu patch the player program, so they need
-# the exact program they were made for (md5 of the running one).
+# from pointers in its code, kernel symbols). Subtitles and the factory menu patch the player program, which differs
+# per region: subs.sh / fpage.sh "check" look for a known layout (every regional v65 program, also jailbroken or run by
+# jb_overlay) by fingerprints of the patched code in the running program. fpage.sh exits with 2 ("not needed") when the
+# running program's own factory page code already takes normal remote keys (it names them): nothing to install.
 LIBLP_MD5=e39b358c5b0948933f49fd3099f81114   # playback library (MKV hooks)
 KCHECK=${OPPODV_KCHECK:-sh $S/oppo-dv-mkv/p7kel.sh check}
 KDIAG=${OPPODV_KDIAG:-sh $S/oppo-dv-mkv/p7kel.sh diag}
+SCHECK=${OPPODV_SCHECK:-sh $S/oppo-dv-mkv/subs.sh check}
+MCHECK=${OPPODV_MCHECK:-sh $S/oppo-dv-mkv/fpage.sh check}
 RUN=$(running)
 # boot hook: free, ours, or the jb_overlay mod (chained); anything else blocks every part
 CHAIN=; HOOK=
@@ -75,12 +79,13 @@ elif ! grep -q "^bdpdrv1 .* 0x7e8d3000 " $MODULES; then
 elif ! DVK=$($KCHECK 2>&1); then
   DV_WHY="video driver check: $(echo $DVK) (a driver dump helps to add support for it, see the README)"
 fi
-if [ -z "$SUBS_WHY" ]; then
-  if [ -n "$CHAIN" ]; then SUBS_WHY="the jb_overlay mod uses its own player program and theme"
-  elif [ "$RUN" != $RU_PLAYER ]; then SUBS_WHY="the running player program (md5 ${RUN:-unknown}) is not the RU 65-0131 one"; fi
+SCK=; MCK=
+[ -z "$SUBS_WHY" ] && [ -f $S/oppo-dv-mkv/subs.sh ] && { SCK=$($SCHECK 2>&1) || SUBS_WHY="$(echo $SCK) (a full dump helps to add support for it, see the README)"; }
+MENU_NN=   # set to fpage.sh's "not needed: ..." message
+if [ -f $S/oppo-dv-mkv/fpage.sh ]; then MCK=$($MCHECK 2>&1); case $? in
+  0) ;; 2) MENU_NN="not needed - $(echo ${MCK#not needed: })";;
+  *) MENU_WHY="$(echo $MCK) (a full dump helps to add support for it, see the README)";; esac
 fi
-case " $MENU_PLAYERS " in *" $RUN "*) [ -n "$RUN" ] || MENU_WHY="player program not found";;
-  *) MENU_WHY="the running player program (md5 ${RUN:-unknown}) is not a supported one (RU 65-0131, or its jb_overlay V3 copy)";; esac
 
 if [ -e $S/CHECKONLY ]; then
   echo "--- compatibility report (nothing is installed or changed) ---"
@@ -89,7 +94,9 @@ if [ -e $S/CHECKONLY ]; then
   echo "liblp.so:  $(m5 $LIBLP)  (needed $LIBLP_MD5)"
   echo "bdpdrv1:   $($KCHECK 2>&1 | tr '\n' ' ')"
   echo "bdpprog.1: $(m5 $PLAYER)  (region player program, informative)"
-  echo "running:   $RUN  (player program in use; subtitles need $RU_PLAYER, the factory menu one of: $MENU_PLAYERS)"
+  echo "running:   $RUN  (player program in use)"
+  echo "subtitles: $(echo $SCK)"
+  echo "menu:      $(echo $MCK)"
   echo "launcher:  $(m5 $LAUNCHER), starts /mnt/ubi_boot/bdpprog: $(grep -q /mnt/ubi_boot/bdpprog $LAUNCHER 2>/dev/null && echo yes || echo NO)"
   echo "module:    $(grep '^bdpdrv1 ' $MODULES)"
   if [ -e $U/bdpprog ]; then
@@ -102,8 +109,9 @@ if [ -e $S/CHECKONLY ]; then
   [ -n "$HOOK" ] && BASE=$HOOK
   yn(){ [ -n "$BASE" ] && { echo "no - $BASE"; return; }; [ -z "$1" ] && echo yes || echo "no - $1"; }
   DV_R=$(yn "$DV_WHY"); SUBS_R=$(yn "$SUBS_WHY"); MENU_R=$(yn "$MENU_WHY")
+  [ -n "$MENU_NN" ] && [ -z "$BASE" ] && MENU_R=$MENU_NN
   echo "Dolby Vision MKV fix:   $DV_R"; echo "Subtitle improvements:  $SUBS_R"; echo "Factory menu shortcut:  $MENU_R"
-  if [ -n "$BASE" ] || [ -n "$DV_WHY" -a -n "$SUBS_WHY" -a -n "$MENU_WHY" ]; then echo "VERDICT: NOT COMPATIBLE - the installer would refuse (see the lines above)."
+  if [ -n "$BASE" ] || [ -n "$DV_WHY" -a -n "$SUBS_WHY" -a -n "$MENU_WHY$MENU_NN" ]; then echo "VERDICT: NOT COMPATIBLE - the installer would refuse (see the lines above)."
     HEAD="compatibility check: NOT COMPATIBLE, the installer would install nothing (nothing was changed)"
   else echo "VERDICT: COMPATIBLE - the parts marked yes can be installed"
     HEAD="compatibility check (nothing was changed): the parts marked yes can be installed"; fi
@@ -133,7 +141,10 @@ fi
 [ -n "$HOOK" ] && fail "$HOOK"
 [ -n "$CHAIN" ] && ! ours && echo "jb_overlay mod found: it keeps working, oppo-dv-mkv starts first and then hands over to it"
 echo "firmware: bdpprog.1 md5 $(m5 $PLAYER), running player program ${RUN:-unknown}"
+[ -n "$MENU" ] && [ -n "$MENU_NN" ] && { echo "  factory menu shortcut $MENU_NN"; MENU=; MENU_R=$MENU_NN; }
 [ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "video driver: $DVK"
+[ -n "$SUBS" ] && [ -z "$SUBS_WHY" ] && echo "subtitles: $(echo $SCK)"
+[ -n "$MENU" ] && [ -z "$MENU_WHY" ] && echo "factory menu: $(echo $MCK)"
 for p in DV SUBS MENU; do
   eval "on=\$$p; why=\$${p}_WHY"
   [ -n "$on" ] || continue
@@ -141,6 +152,12 @@ for p in DV SUBS MENU; do
   if [ -n "$why" ]; then echo "  $n skipped: $why"; eval "$p=; ${p}_R=\"NOT installed - \$why\""
   else eval "${p}_R=installed"; fi
 done
+# jb_overlay's dark theme brings its own menu images: the subtitle colour squares keep the theme's colours there
+[ -n "$SUBS" ] && [ -n "$CHAIN" ] && SUBS_R="installed (with the jb_overlay dark theme the colour squares in the subtitle menu keep the theme's colours)"
+if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
+  echo "NOTHING TO INSTALL: this player does not need the factory menu shortcut (see above). Nothing was changed."
+  HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
+fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
 FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done)}; do

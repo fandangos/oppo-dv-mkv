@@ -27,6 +27,8 @@ O=$STICK/oppo-dv-mkv-dump
 L=$STICK/oppo-dv-mkv-dump.log
 TGZ=$STICK/oppo-dv-mkv-dump.tar.gz
 if [ "$1" != run ]; then   # return to the player at once, dump in the background at low priority
+  # once per boot: some players start AutoScript twice (e.g. with a second USB disk), two dumps would mix
+  mkdir $R/tmp/oppo-dv-mkv-dump.lock 2>/dev/null || { echo "=== dump already started during this boot, not again" >>$L; exit 0; }
   if command -v nice >/dev/null 2>&1; then nice -n 10 sh "$0" run </dev/null >>$L 2>&1 &
   else sh "$0" run </dev/null >>$L 2>&1 &
   fi
@@ -201,7 +203,8 @@ fi
 for f in $U/bdpprog $U/bdpprog.*; do
   [ -f "$f" ] || continue
   grab "$f"
-  w=other; grep -q "oppo-dv-mkv boot wrapper" "$f" && w=oppo-dv-mkv; grep -q jb_overlay "$f" && w=jb_overlay
+  w=other; grep -q jb_overlay "$f" && w=jb_overlay   # our wrapper mentions jb_overlay too: test it last
+  grep -q "oppo-dv-mkv boot wrapper" "$f" && w=oppo-dv-mkv
   info "boot hook:  ${f#$R}  md5 $(m5 "$f")  ($w)"
 done
 [ -e $U/bdpprog ] || info "boot hook:  none (/mnt/ubi_boot/bdpprog missing)"

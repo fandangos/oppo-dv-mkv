@@ -1,0 +1,13 @@
+# Player programs the layout tables in subs.sh and fpage.sh are generated from (regen.sh). name md5 description.
+# The programs are Oppo's: not in this repository. A new program found in a full dump is added here.
+RU-jb   49b649bdcffe8b611f1b7bbc0d9fa0b1  RU 65-0131 free jailbreak bdpprog.1 (the reference)
+RU-ovl  82e04bcfc60a53892668ea325311b3a6  jb_overlay V3 bdpprog.1 (built from the RU jailbreak one)
+RU      8b3ceca8cc215d76e363a58d14ad6811  stock v65 RU
+EU      7162cdcc67748820b0c4e97dea87b706  stock v65 EU
+AU      f6cc1a475ebb4840945e2cb5bdcd66d7  stock v65 AU
+CN      47bc4f113f62e8199ea2e34f47a759f5  stock v65 CN
+TW      a26ad8ce70d3c2a514e282485beb5841  stock v65 TW
+JP      603c0e5c73ee79f571941fdbb23a529d  stock v65 JP
+US      81b3b7cf6c9e2a2b2cafdb7ed4a63fe6  stock v65 US
+USA-jb  a351825df9aa61c758bf5740b2ec457a  USA jailbreak bdpprog.1 (the RU 65-0131 program, 25 bytes changed in the jailbreak's .text1)
+CXUHD   35427c58c16c23e5d7825a3421c81cb9  Cambridge Audio CXUHD 66-0614 bdpprog.1 (factory page: stock trigger on normal keys)
