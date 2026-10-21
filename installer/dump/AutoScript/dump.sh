@@ -92,7 +92,7 @@ for p in $P; do
   # the libraries it maps, and the menu image it really uses (the jb_overlay theme or a mod may supply its own).
   # System locations only: never media files, anything on a stick or share, or the key store (/mnt/rootfs_enc_it).
   for f in $(awk '$6 ~ /^\/(usr|lib|bin|sbin|res|tmp|mnt\/rootfs_normal|mnt\/ubi_boot)\// && $6 ~ /(\.so|\/image_bdp83\.bin$)/ \
-                  && $6 !~ /^\/mnt\/ubi_boot\/(BUDA|APDA|var)\// {print $6}' $d/maps | sort -u); do
+                  && $6 !~ /^\/mnt\/ubi_boot\/(BUDA|APDA)\// {print $6}' $d/maps | sort -u); do
     grab "$R$f" "$f"
     case "$f" in
       */liblp*) info "liblp:      $f  md5 $(m5 "$R$f")  ($(st $(m5 "$R$f")))";;
