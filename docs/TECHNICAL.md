@@ -15,6 +15,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 |---|---|---|---|
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
+| Black letterbox bars in Dolby Vision (v1.6.0-beta1) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
 
@@ -311,6 +312,32 @@ flagged (one per file played to the end).
 | 6 | enable |
 
 The VDP0 sync timestamp, the clamp counters and the stop counter live further in the struct (see `elfix.c`).
+
+### Black letterbox bars (`bgfix.sh`, v1.6.0-beta1)
+
+Found and tested by a user ([issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5)). The pixel mixer (PMX)
+fills everything outside the video window with a background colour. The player sets it as RGB through the middleware
+(`[PMX_SET_MW] SET_TYPE_BG,r(%d),g(%d),b(%d)`, stored per mixer at `0x7ed7a6c0` in the RU build; RGB 0,0,0 in every
+RAM dump we have). The middleware converts it to limited-range YCbCr (black = `0x108080`, `Y<<16 | Cb<<8 | Cr`) and
+calls `PMX_SetBg(id, ycc)` (`0x7e9eadc4`: ids 0 and 1, stores the word at `+0x20` of the mixer's 0x1e4-byte context),
+which calls `PMX_HalSetBg` (`0x7e9e1868`: returns at once for any id but 0):
+
+```
+7e9e1868  cmp r0, #0 ; bxne lr
+7e9e1870  ldr r0, =<PMX context>          (data address: differs per driver build)
+7e9e1874  ubfx ip, r1, #20, #4             Y  >> 4   <- patched to  mov ip, #0  (00c0a0e3)
+7e9e1878  str lr, [sp, #-4]!
+          ... for the 4 mixer paths at context +0xc, +0x24, +0x14, +0x1c:
+          bfi into bits 4..7 of +0xb8 (Y), +0xb9 (Cb, from ubfx r1,#12,#4), +0xba (Cr, from ubfx r1,#4,#4)
+```
+
+Stock black gives `10 80 80` at `+0xb8..+0xba`, luma 1/16 of full scale: about 0.1 nit in PQ (Dolby Vision output),
+black in SDR/HDR10. Patched: `00 80 80`. `PMX_Reset` and `MW_PMX_Init` also go through `PMX_HalSetBg`, so every later
+background gets luma 0 too. The code is byte-identical in the four known driver builds (RU, US +0x90, +0x50, CXUHD
+−0x8), so `bgfix.sh` does not need p7kel's data offset: it checks `PMX_HalSetBg`'s first 8 bytes and the instruction
+after the site (the literal load in between holds a data address and is skipped) and writes the 4 bytes. After
+writing it sets the background once more through the driver CLI (`drv.pmx.set.bg 0 0x108080`, handled by
+`_PmxSetCmdBg`) so it shows without a restart. `bgfix.sh status` prints `on`/`off`, `check` adds "compatible".
 
 ## Part 3: subtitles (`subs.sh`)
 
