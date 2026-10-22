@@ -13,9 +13,14 @@ remote has. With the factory menu shortcut installed, the normal remote opens it
 
 |   English   | Deutch |  Russian |
 | :----------:   | :------: | :---------:  |
-| ![Main EN](./images/gap-en.png) | ![Main DE](./images/gap-de.png) | ![Main RU](./images/gap-ru.png)
+| ![Gap EN](./images/gap-en.png) | ![Gap DE](./images/gap-de.png) | ![Gap RU](./images/gap-ru.png)
 
 3. Press **0 0 0 0**.
+
+|   English   | Deutch |  Russian |
+| :----------:   | :------: | :---------:  |
+| ![Facttory EN](./images/factory-en.png) | ![Factory DE](./images/factory-de.png) | ![Factory RU](./images/factory-ru.png)
+
 
 The page shows the firmware version, sub version and loader version, the DVD and Blu-ray region codes, and some
 service buttons. Close it with Return.
