@@ -1,9 +1,8 @@
 oppo-dv-mkv - Dolby Vision (profile 5, 7 FEL/MEL, 8) from MKV for the jailbroken Oppo UDP-203
 https://github.com/fandangos/oppo-dv-mkv
 
-TEST VERSION v1.6.0-beta1: with the Dolby Vision MKV fix, the black bars around a Dolby Vision picture that does
-not fill the screen (e.g. 3840x1600 films) are true black instead of dark grey (visible on OLED TVs). Everything
-else is v1.5.0. Please report on GitHub (issue #5) how the bars look; to go back, run the v1.5.0 zip.
+Since v1.6.0 the Dolby Vision MKV fix also makes the bars around a Dolby Vision picture that does not fill the
+screen (e.g. 3840x1600 films) true black instead of dark grey (visible on OLED TVs).
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every

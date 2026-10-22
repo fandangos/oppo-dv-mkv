@@ -15,7 +15,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 |---|---|---|---|
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
-| Black letterbox bars in Dolby Vision (v1.6.0-beta1) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
+| Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
 
@@ -313,7 +313,7 @@ flagged (one per file played to the end).
 
 The VDP0 sync timestamp, the clamp counters and the stop counter live further in the struct (see `elfix.c`).
 
-### Black letterbox bars (`bgfix.sh`, v1.6.0-beta1)
+### Black letterbox bars (`bgfix.sh`, v1.6.0)
 
 Found and tested by a user ([issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5)). The pixel mixer (PMX)
 fills everything outside the video window with a background colour. The player sets it as RGB through the middleware

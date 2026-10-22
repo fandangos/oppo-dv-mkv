@@ -73,9 +73,9 @@ With this fix installed:
 Audio (tested with AC-3 and Dolby TrueHD Atmos bitstreamed to an AV receiver, with correct lip sync), pause and
 resume, seeking, fast-forward, stopping and playing the next file all work. Discs and TS files keep working as before.
 
-**Test version v1.6.0-beta1:** the black bars the player adds around a Dolby Vision picture that does not fill the
-screen (for example a 3840x1600 film) are true black instead of a dark grey that shows on OLED TVs. See
-[fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160-beta1).
+**Since v1.6.0:** the black bars the player adds around a Dolby Vision picture that does not fill the screen (for
+example a 3840x1600 film) are true black instead of a dark grey that shows on OLED TVs. See
+[fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160).
 
 ## Better subtitles
 
@@ -316,7 +316,7 @@ are not.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
-  `bgfix: on (on)` (v1.6.0-beta1) and `boot marked healthy`.
+  `bgfix: on (on)` (since v1.6.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
 
@@ -493,14 +493,15 @@ moment; the reset cut its picture short (green strips), and when the picture nev
 unless it is single-stream Dolby Vision. Discs, BDMV folders and dual-stream content play exactly as on stock
 firmware again.
 
-### 11. Grey letterbox bars in Dolby Vision (v1.6.0-beta1)
+### 11. Grey letterbox bars in Dolby Vision (v1.6.0)
 
 Found, analysed and tested by a user ([issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5)).
 
 **Symptom:** when a Dolby Vision picture does not fill the screen (for example 3840x1600 for a 2.39:1 film), the
 bars the player adds above and below it are dark grey instead of black. It is the player's own behaviour, also
 without oppo-dv-mkv; bars that are part of the encoded picture are fine. It shows on TVs that reach true black, such
-as OLED; on the LCD (QLED) TV used for testing here it is not visible.
+as OLED (confirmed by users, for example on an LG G5 in TV-led mode); on the LCD (QLED) TV used for testing here
+it is not visible.
 
 **Cause:** the video mixer paints everything outside the video window with a background colour. The player asks for
 black, the driver turns it into the video black level (Y 16 of 255) and `PMX_HalSetBg` keeps only the top 4 bits of
@@ -636,10 +637,11 @@ Kernel counters showed whether any hook ran.
 | On the RU development player (busybox, everything in a scratch folder in RAM): `subs.sh` / `fpage.sh` check, subtitles over the patched player, factory menu off/on; both scripts on the CXUHD program as a fake process; the installer's check, full and repeated runs for RU, and full, factory-menu-only and check runs for the CXUHD program; the boot wrapper fail-safes; the dump started twice | layout RU, "already" everywhere, off/on OK; CXUHD layout and "not needed" with the keys (exit 2); every installer result as in the offline test, the repeated run did nothing; wrapper and dump lock as offline; `/mnt/ubi_boot` untouched |
 | Factory menu shortcut on the RU development player: Gapless Playback + 0 0 0 0 | the Factory Page opens; on/off/on cycles of the patch |
 
-### Black letterbox bars (v1.6.0-beta1)
+### Black letterbox bars (v1.6.0)
 
 | Test | Result |
 |---|---|
+| Users with the test version v1.6.0-beta1 (GitHub issue #5 and AVForums), including an LG G5 OLED in TV-led mode, on films whose bars the player adds | grey bars before, pitch black with the fix |
 | The issue author (UDP-203 clone, USA jailbreak, US driver build): cropped Dolby Vision MKVs, with the patch on and off | grey bars without, black bars with it; Dolby Vision playback otherwise unchanged |
 | `bgfix.sh` on the driver images of the four known builds (RU, US, +0x50, Cambridge CXUHD), simulated | the same code in all four: check, on, off and status work; with one byte changed at the site or next to it, nothing is written |
 | On the RU development player: the mixer's background registers with the patch off and on | `10 80 80` (luma 1/16) and `00 80 80` (luma 0), on all four mixer paths |
@@ -707,18 +709,18 @@ each blob is printed. No firmware files are needed or included.
   [FFmpeg](https://ffmpeg.org/), [tsMuxeR](https://github.com/justdan96/tsMuxer) and
   [Ghidra](https://ghidra-sre.org/), used to make the test files and to analyse the firmware.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
-- The black letterbox bar fix (v1.6.0-beta1) was found and tested by a user in
+- The black letterbox bar fix (v1.6.0) was found and tested by a user in
   [issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5).
 
 ## Changelog
 
-- **v1.6.0-beta1 (test version):**
-  - **Black letterbox bars in Dolby Vision:** the bars around a picture that does not fill the screen were dark grey
-    (about 0.1 nit, visible on OLED). One instruction in the video driver makes them black (`bgfix.sh`, part of the
-    Dolby Vision MKV fix, every place checked before it is written). See
-    [fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160-beta1).
-  - Everything else is v1.5.0. Updating from v1.5.0 adds `bgfix.sh`; the other files stay as they are. Going back
-    to v1.5.0 (its zip, run like the installer) switches the fix off at the next boot.
+- **v1.6.0: black letterbox bars in Dolby Vision.**
+  - The bars around a Dolby Vision picture that does not fill the screen were dark grey (about 0.1 nit, visible on
+    OLED). One instruction in the video driver makes them black (`bgfix.sh`, part of the Dolby Vision MKV fix, every
+    place checked before it is written). Found and tested by a user (issue #5); confirmed by several users with the
+    test version v1.6.0-beta1, on OLED TVs. See [fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160).
+  - Everything else is v1.5.0. Updating from v1.5.0 (or v1.6.0-beta1) adds or keeps `bgfix.sh`; the other files stay
+    as they are. Going back to v1.5.0 (its zip, run like the installer) switches the fix off at the next boot.
 - **v1.5.0: recommended update for everyone on v1.4.0 (and older).**
   - **Subtitle improvements and factory menu for every regional v65 player program** (RU, EU, AU, CN, TW, JP,
     US/default), jailbroken or run by jb_overlay: one layout per region, chosen on the player by fingerprints of the
