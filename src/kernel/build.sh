@@ -19,3 +19,18 @@ for v in ru:0 us:0x90 d50:0x50 rel:0x1000; do
 done
 cp build/elfix-ru.bin build/elfix.bin; cp build/elfix-ru.elf build/elfix.elf
 md5sum build/elfix-*.bin
+# hvccfix.sh carries the splitter stub as hex: rebuild it from hvcc.S (cave .text+0x60904, tail .text+0x5e234) and compare
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c hvcc.S -o build/hvcc.o
+ld.lld -static -Ttext=0x60904 --defsym cont=0x5e234 -e hvcc_stub build/hvcc.o -o build/hvcc.elf
+llvm-objcopy -O binary -j .text build/hvcc.elf build/hvcc.bin
+H=$(od -An -v -tx1 build/hvcc.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' hvccfix.sh)00000000" ] || { echo "hvccfix.sh STUB does not match hvcc.S"; exit 1; }
+echo "hvccfix.sh stub matches hvcc.S"
+# sarfix.sh carries the bdpdrv1 stubs as hex: rebuild them from sar.S (cave 0x7e94d600, joins in the two callers) and compare
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c sar.S -o build/sar.o
+ld.lld -static -Ttext=0x7e94d600 --defsym join_frame=0x7e9b8574 --defsym join_desired=0x7e9c18c4 -e sar_frame build/sar.o -o build/sar.elf
+llvm-objcopy -O binary -j .text build/sar.elf build/sar.bin
+H=$(od -An -v -tx1 build/sar.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' sarfix.sh)" ] || { echo "sarfix.sh STUB does not match sar.S"; exit 1; }
+[ $(stat -c %s build/sar.bin) -le $((0x7e94d728 - 0x7e94d600)) ] || { echo "sar.S does not fit its cave"; exit 1; }
+echo "sarfix.sh stub matches sar.S"

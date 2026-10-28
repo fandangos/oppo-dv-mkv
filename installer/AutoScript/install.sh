@@ -7,9 +7,9 @@
 # If AutoScript/CHECKONLY exists it only writes a compatibility report to the log and the result file, changing nothing.
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
-#   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh (Dolby Vision
-#                                       MKV fix), subs.sh, image_bdp83.bin (subtitles), fpage.sh (factory menu). RAM
-#                                       patches applied at every boot.
+#   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, hvccfix.sh,
+#                                       alacdec.bin, bdpaudec.db (Dolby Vision MKV fix), subs.sh, image_bdp83.bin
+#                                       (subtitles), fpage.sh (factory menu). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
 VERSION=@VERSION@
 S=${OPPODV_SRC:-/mnt/sda1/AutoScript}                 # this folder on the stick
@@ -28,6 +28,7 @@ PREV=$U/bdpprog.prev
 IN_DV=$DV; IN_SUBS=$SUBS; IN_MENU=$MENU   # what this zip contains (DV/SUBS/MENU become what gets installed)
 SQUARES="09 11 18 19 20 21 22 23"
 RESORIG=${OPPODV_RESORIG:-/mnt/rootfs_normal/res/image_bdp83.bin}
+DBORIG=${OPPODV_DBORIG:-/mnt/rootfs_normal/res/bdpaudec.db}   # audio DSP decoders (stock v65: 0abee82b...)
 exec >>$L 2>&1
 # once per boot: some players start AutoScript twice (e.g. with a second USB disk); two runs must not overlap
 mkdir ${OPPODV_LOCK:-/tmp/oppo-dv-mkv.lock} 2>/dev/null || { echo "=== installer already started during this boot, not again"; exit 0; }
@@ -62,6 +63,8 @@ LIBLP_MD5=e39b358c5b0948933f49fd3099f81114   # playback library (MKV hooks)
 KCHECK=${OPPODV_KCHECK:-sh $S/oppo-dv-mkv/p7kel.sh check}
 KDIAG=${OPPODV_KDIAG:-sh $S/oppo-dv-mkv/p7kel.sh diag}
 BCHECK=${OPPODV_BCHECK:-sh $S/oppo-dv-mkv/bgfix.sh check}   # black letterbox bars (DV part; its own check at every boot)
+HCHECK=${OPPODV_HCHECK:-sh $S/oppo-dv-mkv/hvccfix.sh check} # MKVs whose hvcC has no VPS/SPS/PPS (DV part; idem)
+ACHECK=${OPPODV_ACHECK:-sh $S/oppo-dv-mkv/sarfix.sh check}  # non-square pixels stretched to ~16:9 (DV part; idem)
 SCHECK=${OPPODV_SCHECK:-sh $S/oppo-dv-mkv/subs.sh check}
 MCHECK=${OPPODV_MCHECK:-sh $S/oppo-dv-mkv/fpage.sh check}
 RUN=$(running)
@@ -95,6 +98,9 @@ if [ -e $S/CHECKONLY ]; then
   echo "liblp.so:  $(m5 $LIBLP)  (needed $LIBLP_MD5)"
   echo "bdpdrv1:   $($KCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/bgfix.sh ] && echo "letterbox: $($BCHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/sarfix.sh ] && echo "pixel AR:  $($ACHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/hvccfix.sh ] && echo "hvcC:      $($HCHECK 2>&1 | tr '\n' ' ')  (splitter: $(grep '^splitter ' $MODULES | cut -d' ' -f1,2,6))"
+  [ -f $S/oppo-dv-mkv/alacdec.bin ] && echo "audio db:  $(m5 $DBORIG)  (ALAC decoder swap needs 0abee82b1ea7bc77d3db30907355376b)"
   echo "bdpprog.1: $(m5 $PLAYER)  (region player program, informative)"
   echo "running:   $RUN  (player program in use)"
   echo "subtitles: $(echo $SCK)"
@@ -144,7 +150,9 @@ fi
 [ -n "$CHAIN" ] && ! ours && echo "jb_overlay mod found: it keeps working, oppo-dv-mkv starts first and then hands over to it"
 echo "firmware: bdpprog.1 md5 $(m5 $PLAYER), running player program ${RUN:-unknown}"
 [ -n "$MENU" ] && [ -n "$MENU_NN" ] && { echo "  factory menu shortcut $MENU_NN"; MENU=; MENU_R=$MENU_NN; }
-[ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "video driver: $DVK" && echo "black letterbox bars: $($BCHECK 2>&1)"
+[ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "video driver: $DVK" && echo "black letterbox bars: $($BCHECK 2>&1)" \
+  && echo "non-square pixels (stretched to 16:9): $($ACHECK 2>&1)" \
+  && echo "MKVs without VPS/SPS/PPS in the hvcC: $($HCHECK 2>&1)"
 [ -n "$SUBS" ] && [ -z "$SUBS_WHY" ] && echo "subtitles: $(echo $SCK)"
 [ -n "$MENU" ] && [ -z "$MENU_WHY" ] && echo "factory menu: $(echo $MCK)"
 for p in DV SUBS MENU; do
@@ -161,7 +169,7 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh bgfix.sh}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh hvccfix.sh alacdec.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done)}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
@@ -174,7 +182,19 @@ put(){  # atomic copy: $1 source, $2 destination
   echo "  $2 installed"
 }
 for f in $FILES; do put $S/oppo-dv-mkv/$f $D/$f || fail "writing $D/$f"; done
-[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/hvccfix.sh $D/alacdec.bin $D/bdpaudec.db && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+if [ -n "$DV" ]; then
+  # audio DSP decoders: the player's own file, with the ALAC decoder of firmware 56/60 appended and its entry (index 28,
+  # offset field at byte 1276) pointed at it. 65's ALAC decoder is too slow for some 192 kHz files (crackling).
+  if [ "$(m5 $DBORIG)" != 0abee82b1ea7bc77d3db30907355376b ]; then rm -f $D/bdpaudec.db; echo "  audio decoder file: unexpected original file (skipped)"
+  elif [ "$(m5 $D/bdpaudec.db)" = 31b1901fc4114ea4911ff04757959651 ]; then echo "  $D/bdpaudec.db up to date"
+  else
+    I=$D/bdpaudec.db.tmp
+    cat $DBORIG $D/alacdec.bin > $I && printf '\010\173\023\000' | dd of=$I bs=1 seek=1276 conv=notrunc 2>/dev/null
+    sync; [ "$(m5 $I)" = 31b1901fc4114ea4911ff04757959651 ] && mv $I $D/bdpaudec.db && sync \
+      && echo "  $D/bdpaudec.db built" || { rm -f $I; echo "  audio decoder file could not be built (skipped)"; }
+  fi
+fi
 [ -z "$MENU" ] && [ -e $D/fpage.sh ] && rm -f $D/fpage.sh && echo "  factory menu shortcut not installed now: older copy removed"
 if [ -n "$SUBS" ]; then
   # subtitle menu squares: rebuild image_bdp83.bin from the player's own file + our 8 colour squares

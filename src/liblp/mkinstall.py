@@ -14,7 +14,8 @@ def bl(src, dst):
     return struct.pack('<I', 0xeb000000 | (off & 0xffffff))
 sites = [(0x3c57ec, 0x158dd8, 'h0_tracks'), (0x3c2ff0, 0x158dd8, 'h0_tracks'),
          (0x3c00d4, 0x16863c, 'h1_skip'), (0x3d252c, 0x163164, 'h2_mmed'), (0x3c99a4, 0x157f98, 'h3_vinfo')]
-CAVE, ST, STLEN = 0x6cdc00, 0x757e00, 0x40
+CAVE, ST, STLEN = 0x6cdc00, 0x757e00, 0x44
+HVCC = 0x40   # struct st .hvcc
 assert len(blob) <= 0x400   # cave = zero padding at the end of liblp's code segment
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 rows = []
@@ -22,7 +23,8 @@ for va, orig, h in sites:
     o = bl(va, orig)
     n = bl(va, syms[h]); rows.append((va, o.hex(), n.hex(), hx(o), hx(n)))
 out = f'''#!/bin/sh
-# oppo-dv-mkv: Dolby Vision from MKV (P5/P8 single layer, P7 BL+EL single track; dvcC/dvvC-detected) - RAM patch for liblp.so. usage: on|off|status
+# oppo-dv-mkv: Dolby Vision from MKV (P5/P8 single layer, P7 BL+EL single track; dvcC/dvvC-detected) - RAM patch for liblp.so.
+# usage: on|off|status|hvcc on|off  (hvcc: DV also for MKVs whose hvcC has no VPS/SPS/PPS; only once hvccfix.sh is on)
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 LIB_MD5=e39b358c5b0948933f49fd3099f81114
 [ "$(md5sum /usr/local/lib/liblp.so | cut -d' ' -f1)" = $LIB_MD5 ] || {{ echo "liblp md5 mismatch"; exit 1; }}
@@ -44,6 +46,11 @@ on)
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST:#x})) count={STLEN} conv=notrunc 2>/dev/null
   for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; w4 $a "$(esc ${{r#*:}})"; done
   echo "dvhook ON";;
+hvcc)
+  [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
+  case "$2" in on) v='\\x01';; off) v='\\x00';; *) echo "usage: hvcc on|off"; exit 1;; esac
+  printf "$v" | dd of=$M bs=1 seek=$((B + {ST + HVCC:#x})) conv=notrunc 2>/dev/null
+  echo "empty hvcC (no VPS/SPS/PPS): DV $([ "$(rd $((B + {ST + HVCC:#x})) 1)" = 01 ] && echo allowed || echo refused)";;
 off)
   for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; [ "$(rd $a 4)" = "${{r#*:}}" ] && w4 $a "$(esc ${{r%%:*}})"; done
   echo "dvhook OFF";;
