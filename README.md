@@ -77,7 +77,7 @@ resume, seeking, fast-forward, stopping and playing the next file all work. Disc
 example a 3840x1600 film) are true black instead of a dark grey that shows on OLED TVs. See
 [fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160).
 
-**Since v1.7.0 (in progress, not released yet):** profile 5 and 8 MKVs whose HEVC `CodecPrivate` (hvcC) carries no
+**Since v1.7.0:** profile 5 and 8 MKVs whose HEVC `CodecPrivate` (hvcC) carries no
 VPS/SPS/PPS, typical of MKVs remuxed from an `hev1` MP4, play in Dolby Vision too. Before, they played the stock way
 (purple/green for profile 5) and started a few seconds late, and remuxing them was the only way. See
 [fix 12](#12-mkvs-without-parameter-sets-in-the-hvcc-v170).
@@ -802,7 +802,7 @@ each blob is printed. No firmware files are needed or included.
 
 ## Changelog
 
-- **v1.7.0 (in progress, not released yet):**
+- **v1.7.0: Dolby Vision for MKVs without VPS/SPS/PPS in the hvcC; non-square pixels no longer stretched.**
   - **Dolby Vision for profile 5/8 MKVs without VPS/SPS/PPS in the hvcC** (typical of MKVs remuxed from an `hev1`
     MP4). They played the stock way (purple/green for profile 5) and started a few seconds late. A 16-instruction
     patch in the kernel's MKV demuxer (`hvccfix.sh`, part of the Dolby Vision MKV fix, every place checked before it
