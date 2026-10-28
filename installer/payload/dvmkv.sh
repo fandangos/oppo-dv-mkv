@@ -13,6 +13,10 @@ log "player pid $P"
 [ -f $D/dvhook.sh ] && sh $D/dvhook.sh on 2>&1 | while read l; do log "dvhook: $l"; done   # MKV Dolby Vision signalling (liblp)
 [ -f $D/p7kel.sh ] && sh $D/p7kel.sh on 2>&1 | while read l; do log "p7kel: $l"; done     # profile 7 decoder fixes (kernel)
 [ -f $D/bgfix.sh ] && sh $D/bgfix.sh on 2>&1 | while read l; do log "bgfix: $l"; done     # black letterbox bars in Dolby Vision (kernel)
+if [ -f $D/hvccfix.sh ]; then   # MKVs whose hvcC has no VPS/SPS/PPS (kernel); DV is signalled for them only once it is on
+  h=$(sh $D/hvccfix.sh on 2>&1); r=$?; echo "$h" | while read l; do log "hvccfix: $l"; done
+  [ $r = 0 ] && sh $D/dvhook.sh hvcc on 2>&1 | while read l; do log "dvhook: $l"; done
+fi
 [ -f $D/subs.sh ] && sh $D/subs.sh 2>&1 | while read l; do log "subs: $l"; done   # improved subtitles
 [ -f $D/fpage.sh ] && sh $D/fpage.sh on 2>&1 | while read l; do log "menu: $l"; done   # factory menu shortcut
 sleep 90; [ -d /proc/$P ] && { rm -f $D/bootcount; sync; log "boot marked healthy"; }

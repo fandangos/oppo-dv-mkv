@@ -77,6 +77,11 @@ resume, seeking, fast-forward, stopping and playing the next file all work. Disc
 example a 3840x1600 film) are true black instead of a dark grey that shows on OLED TVs. See
 [fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160).
 
+**Since v1.7.0 (in progress, not released yet):** profile 5 and 8 MKVs whose HEVC `CodecPrivate` (hvcC) carries no
+VPS/SPS/PPS, typical of MKVs remuxed from an `hev1` MP4, play in Dolby Vision too. Before, they played the stock way
+(purple/green for profile 5) and started a few seconds late, and remuxing them was the only way. See
+[fix 12](#12-mkvs-without-parameter-sets-in-the-hvcc-v170).
+
 ## Better subtitles
 
 The stock subtitle renderer draws 1-bit monochrome glyphs, which gives jagged edges and colour fringing around the
@@ -295,10 +300,11 @@ are not.
   layer and the RPU in **one** video track, and that is what this supports. **Dual-track** P7 MKVs (BL and EL in
   two separate video tracks) are **untested** and probably play as HDR10.
 - **MEL** files use exactly the same code path as FEL. Both were tested with full-length films (see Tests).
-- **Profile 5/8 MKVs whose HEVC `CodecPrivate` (hvcC) has no VPS/SPS/PPS** play the stock way, without DV. This is
-  typical of MKVs remuxed from an `hev1` MP4. Signalling DV for such files hard-locks the player, so they are
-  deliberately left alone. Remuxing them so the parameter sets are in the hvcC (for example mkvmerge from a TS) makes
-  them work.
+- **Profile 5/8 MKVs whose HEVC `CodecPrivate` (hvcC) has no VPS/SPS/PPS** (typical of MKVs remuxed from an `hev1`
+  MP4) play in Dolby Vision since v1.7.0 ([fix 12](#12-mkvs-without-parameter-sets-in-the-hvcc-v170)). If the
+  demuxer check fails on a firmware we have not seen (the `hvccfix:` line in `dvmkv.log`), they play the stock way,
+  as before v1.7.0; remuxing them so the parameter sets are in the hvcC (for example mkvmerge from the extracted HEVC
+  stream) makes them work there.
 - **MP4 files with Dolby Vision** are not covered; they freeze the player even on stock firmware.
 - **Player-led (LLDV) mode** was not tested.
 - At the exact point of a **seek** or a fast-forward step, one or two enhancement-layer pictures may fail to decode.
@@ -316,7 +322,8 @@ are not.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
-  `bgfix: on (on)` (since v1.6.0) and `boot marked healthy`.
+  `bgfix: on (on)` (since v1.6.0), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS): DV allowed` (since
+  v1.7.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
 
@@ -512,6 +519,25 @@ the PQ scale, where 1/16 is about 0.1 nit: dark grey next to true black.
 background is always 0. The colour parts stay neutral. In SDR and HDR10 the bars are then slightly below black, which
 TVs show as black. The background the player already set is applied again at boot, so it shows at once.
 
+### 12. MKVs without parameter sets in the hvcC (v1.7.0)
+
+**Symptom:** profile 5/8 MKVs remuxed from an `hev1` MP4 have a 23-byte HEVC `CodecPrivate` (hvcC): the VPS, SPS
+and PPS are only in the keyframes. On stock firmware they start a few seconds late (at the second keyframe) and,
+profile 5, with the purple/green picture. Signalling Dolby Vision for them hard-locked the player, so up to v1.6.0
+the fix left them alone and they had to be remuxed.
+
+**Cause:** the MKV demuxer in the kernel (`splitter.ko`) sends the parameter sets from the hvcC to the decoder one by
+one before the first frame. When there is none, it still sends one, with a length left over from an earlier file.
+A length of 0 makes it skip a "block" that does not exist yet: it restarts reading at the start of the file, reports
+a demux error, and the player restarts the video at the next keyframe. With Dolby Vision on, that restart locked the
+whole player. (Other lengths send a few bytes of the MKV header to the decoder as a fake parameter set.)
+
+**Fix:** a 16-instruction patch in the demuxer (`hvccfix.sh`, part of the Dolby Vision MKV fix) ends the header step
+at that point without sending anything, the same way it ends after the last real parameter set. The decoder takes
+the parameter sets from the first keyframe, as it does for TS files. The liblp part allows Dolby Vision for these
+files only after the demuxer patch is on (`dvmkv.sh` switches them on in that order). The patched code is the same in
+every firmware we have (RU, USA, Cambridge CXUHD).
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -649,6 +675,19 @@ Kernel counters showed whether any hook ran.
 | ... the check zip, the full zip into a scratch folder, and `dvmkv.sh` from the zip | `letterbox: compatible`; `bgfix.sh` installed with the Dolby Vision part; the boot script switches it on |
 | Installer, offline: every earlier scenario, plus updating from v1.5.0 (RU, jb_overlay, CXUHD) and going back to v1.5.0 | all pass (41 steps); the update adds only `bgfix.sh`, the other Dolby Vision files are unchanged; v1.5.0's boot script does not run it |
 
+### MKVs without parameter sets in the hvcC (v1.7.0)
+
+| Test | Result |
+|---|---|
+| Stock firmware: profile 5 MKV with a 23-byte hvcC (a TV episode remuxed from its `hev1` MP4), demuxer debug log on | demux error before the first frame; playback restarts at the keyframe at 5 s (the player shows 00:05 as the start) |
+| ... with the demuxer patch, Dolby Vision still refused | starts at 00:00, no demux error (purple/green, as expected without Dolby Vision) |
+| ... with the demuxer patch and Dolby Vision allowed | **Dolby Vision, correct colours**, 0 decode errors; the patch runs once per start |
+| The whole episode (53 min) with chapters, 4 E-AC-3 tracks and 2 subtitle tracks added | about 12 chapter skips forward and back, stop and resume, audio and subtitle changes: Dolby Vision throughout, 0 decode or demux errors |
+| Regression: profile 5 MKV with a full hvcC, profile 7 FEL MKV | unchanged (Dolby Vision); the patched path is never taken |
+| `hvccfix.sh` on the demuxer RAM images of every player we have a dump of (RU, three USA players, Cambridge CXUHD), simulated | the same code in all of them: check, on, off and status work, and off gives back the original bytes; also at another load address and after an interrupted on. With the module file (relocations not applied), an empty image, or the site or a struct offset changed, nothing is written |
+| On the RU development player, from the mkv-only zip: `dvmkv.sh` with `dvhook.sh` and `hvccfix.sh` | `dvhook ON`, `hvccfix: on (on)`, `empty hvcC (no VPS/SPS/PPS): DV allowed`; the episode in Dolby Vision, the other files unchanged |
+| Installer, offline: every earlier scenario, plus updating from v1.6.0 (RU, jb_overlay, CXUHD) and going back to v1.6.0 | all pass (50 steps); the update adds `hvccfix.sh` and changes `dvhook.sh` and `dvmkv.sh`; v1.6.0's boot script does not run it |
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -661,7 +700,7 @@ Kernel counters showed whether any hook ran.
 | P7 FEL single-stream TS with audio | ✅ Dolby Vision + Dolby Digital |
 | P5 MKV | ✅ Dolby Vision, correct colours |
 | P8.1 MKV | ✅ Dolby Vision |
-| P5 MKV with empty hvcC | plays the stock way, by design |
+| P5 MKV with empty hvcC | plays the stock way, by design (Dolby Vision since v1.7.0, see its tests above) |
 | Commercial UHD Blu-ray disc with FEL Dolby Vision | ✅ unchanged, perfect |
 | Reboot | ✅ patches applied automatically |
 
@@ -679,6 +718,7 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/dvhook.sh   liblp.so patch   (on|off|status)
 /mnt/ubi_boot/oppo-dv-mkv/p7kel.sh    kernel patch     (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/bgfix.sh    kernel patch, black letterbox bars in Dolby Vision (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
@@ -714,6 +754,13 @@ each blob is printed. No firmware files are needed or included.
 
 ## Changelog
 
+- **v1.7.0 (in progress, not released yet):**
+  - **Dolby Vision for profile 5/8 MKVs without VPS/SPS/PPS in the hvcC** (typical of MKVs remuxed from an `hev1`
+    MP4). They played the stock way (purple/green for profile 5) and started a few seconds late. A 16-instruction
+    patch in the kernel's MKV demuxer (`hvccfix.sh`, part of the Dolby Vision MKV fix, every place checked before it
+    is written); `dvhook.sh` allows Dolby Vision for these files only once that patch is on. See
+    [fix 12](#12-mkvs-without-parameter-sets-in-the-hvcc-v170).
+  - Updating from v1.6.0 adds `hvccfix.sh` and replaces `dvhook.sh` and `dvmkv.sh`; the other files stay as they are.
 - **v1.6.0: black letterbox bars in Dolby Vision.**
   - The bars around a Dolby Vision picture that does not fill the screen were dark grey (about 0.1 nit, visible on
     OLED). One instruction in the video driver makes them black (`bgfix.sh`, part of the Dolby Vision MKV fix, every

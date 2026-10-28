@@ -19,6 +19,7 @@ struct st {
     u8 rec[24];      /* dvcC/dvvC record */
     u8 mmed[0x1c];   /* MPC_DOVI_INFO_T handed to mrSetMediaInfo */
     u32 hits;        /* debug counters */
+    u8 hvcc;         /* 1 = splitter fix on (hvccfix.sh): DV also for a 23-byte hvcC (no VPS/SPS/PPS) */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
 
@@ -73,7 +74,9 @@ u32 dv_decide(u8 *proxy, u32 base) {
     u8 prof = s->rec[2] >> 1, lvl = ((s->rec[2] & 1) << 5) | (s->rec[3] >> 3);
     u8 rpu = (s->rec[3] >> 2) & 1, el = (s->rec[3] >> 1) & 1, bl = s->rec[3] & 1;
     u8 *mi = *(u8 **)(p + P_MINFO);
-    if (!mi || mi[MI_HEVC] != 1 || *(u32 *)(mi + MI_CPLEN) <= 23) return 0; /* no VPS/SPS/PPS: DV would hard-lock */
+    if (!mi || mi[MI_HEVC] != 1) return 0;
+    u32 cpl = *(u32 *)(mi + MI_CPLEN);   /* 23 = hvcC header only, VPS/SPS/PPS just in the keyframes (hev1 MP4 remux): */
+    if (cpl < 23 || (cpl == 23 && !s->hvcc)) return 0;   /* stock splitter + DV hard-locks; fine with hvccfix.sh */
     if (!rpu || !bl) return 0;
     if (!(((prof == 5 || prof == 8) && !el) || (prof == 7 && el))) return 0; /* single layer, or P7 BL+EL in one track */
     for (u32 k = 0; k < sizeof s->mmed; k++) s->mmed[k] = 0;

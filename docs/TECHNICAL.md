@@ -16,6 +16,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
+| MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
 
@@ -27,10 +28,10 @@ site before writing, and they write the code blob before redirecting any call in
 liblp file offset = runtime offset from the library's load base. (In Ghidra, with the default image base, add
 0x10000.)
 
-- **Code cave:** the zero padding at the end of the RX segment, `0x6cdc00..0x6ce000`. The blob is 904 bytes of Thumb
+- **Code cave:** the zero padding at the end of the RX segment, `0x6cdc00..0x6ce000`. The blob is 914 bytes of Thumb
   C plus ARM entry shims.
-- **State:** 64 bytes of bss slack at `0x757e00`: parser pointer, have/active flags, profile, level, the 24-byte
-  `dvcC` record, the 0x1c-byte `MPC_DOVI_INFO_T` and a hit counter.
+- **State:** 68 bytes of bss slack at `0x757e00`: parser pointer, have/active flags, profile, level, the 24-byte
+  `dvcC` record, the 0x1c-byte `MPC_DOVI_INFO_T`, a hit counter and (v1.7.0) the `hvcc` flag at `+0x40`.
 
 | Hook (patched `bl`) | Site | Original target | Purpose |
 |---|---|---|---|
@@ -43,8 +44,10 @@ Accepted streams:
 - profile 5 or 8 with BL + RPU and no EL;
 - profile 7 with BL + EL + RPU (single track).
 
-The HEVC `CodecPrivate` must be longer than 23 bytes, i.e. it must carry parameter-set arrays. Signalling DV for an
-hvcC without VPS/SPS/PPS hard-locks the SoC.
+The HEVC `CodecPrivate` must be at least 23 bytes. Exactly 23 bytes is an hvcC without parameter-set arrays (the
+VPS/SPS/PPS are only in the keyframes, typical of a remux from an `hev1` MP4). Such a file is accepted only when the
+`hvcc` flag is set: `dvhook.sh hvcc on`, which `dvmkv.sh` runs only after `hvccfix.sh on` succeeded. With the stock
+demuxer, signalling DV for it hard-locks the SoC (see Part 2b).
 
 Pitfalls:
 - In `MPC_DOVI_INFO_T`, bytes 8 and 9 are **not** profile/level (they are an ID / VS10 flag) and must stay 0.
@@ -338,6 +341,50 @@ background gets luma 0 too. The code is byte-identical in the four known driver 
 after the site (the literal load in between holds a data address and is skipped) and writes the 4 bytes. After
 writing it sets the background once more through the driver CLI (`drv.pmx.set.bg 0 0x108080`, handled by
 `_PmxSetCmdBg`) so it shows without a restart. `bgfix.sh status` prints `on`/`off`, `check` adds "compatible".
+
+## Part 2b: splitter.ko (MKVs without parameter sets in the hvcC, `hvccfix.sh`, v1.7.0)
+
+The MKV demuxer runs in the kernel module `splitter.ko` (size 978326, loaded at `0x7f54b000` on every player we have a
+dump of; `hvccfix.sh` takes the base from `/proc/modules`). Offsets are from the module's `.text`, which starts at the
+base. In Ghidra, with the module imported as an ELF file, add 0x10034.
+
+Functions: `i4CfaMkvTurnOn` `+0x590ec`, `vToNextState` `+0x5adf8`, `vMkvSkipBlock` `+0x5aebc`,
+`i4CfaMkvPbb2FifoAUCtrl` `+0x5af04`, `vCfaMkvTxBlock` `+0x5c1e8`, `vCfaMkvTxDoneStCtrl` `+0x5de84`,
+`cli_cfamkv_debug_off` `+0x60904`.
+
+Instance fields (r8 in `vCfaMkvTxDoneStCtrl`): `+8` read position (u64), `+0x10` state, `+0x80530` CodecPrivate file
+offset (u64), `+0x80538` CodecPrivate length still to send (u64, 0 = no header), `+0x80544` NAL length size,
+`+0x804bc` arrays left (u8), `+0x804c0` NAL length (u16), `+0x804c4` position inside the hvcC (u32).
+
+Normal flow: `i4CfaMkvTurnOn` reads the CodecPrivate when `+0x80538` is not 0 and goes to state 0xb (log
+`Parse SequenceHeader!`). State 0xb, codec 0x15 (HEVC): the first call takes the NAL length size (byte 21) and the
+array count (byte 22); then every call reads one array header and NAL length and queues that NAL as a header packet
+(`i4CfaMkvPbb2FifoAUCtrl` type 1). For the last one it sets the read position to offset + length, the length to 0 and
+the state to 0xd; when the packet is out, case 0xd continues with `vToNextState(param_1, inst, 5, 0, 2)` (the next
+element).
+
+The bug: with 0 arrays, the branch at `+0x5f340` (`bcs +0x5f3b8`, "nothing to parse") falls into the packet code with
+the NAL length at `+0x804c0`, which this file never wrote. Length 0: `i4CfaMkvPbb2FifoAUCtrl` logs `Video Data Len =
+%d,error handle,skip this Block!` and calls `vMkvSkipBlock`, which sets the read position from the current block's
+fields (`+0x80`/`+0x88`, zeroed at turn-on): offset 0, `vMoveUnkownElementID :DMX Error!`, demux error, and the
+middleware restarts the stream at the next keyframe (`VDec_SameStreamStop`, `Range:Video TimeCode`). Any other length
+sends that many bytes after the CodecPrivate as a parameter set.
+
+The patch: site `+0x5f340` `1c00002a` → `6f05002a` (`bcs +0x60904`). The stub (`hvcc.S`, in `cli_cfamkv_debug_off`,
+which only the driver CLI table calls) sets the read position to offset + length and the length to 0, then branches to
+`+0x5e234`, the shared tail of the state switch (`vToNextState(param_1, inst, 5, 0, 2)`, then the function exit).
+Word `+0x40` of the stub counts its runs (`hvccfix.sh status`). `build.sh` assembles `hvcc.S` and checks it against
+the hex in `hvccfix.sh`.
+
+`hvccfix.sh` checks the 40 bytes before the site and the word after it, the literals with the struct offsets the stub
+uses (`+0x5ed2c`, `+0x5ed30`, `+0x5ed5c`, `+0x5ed84`), the 32-byte tail at `+0x5e234` (its `bl` is relative, so the
+same at any base) and the cave's 17 original words. Three of those are `bl UTIL_Printf` (another module); they are
+rebuilt from the untouched `bl UTIL_Printf` at `+0x6094c` (+6, +4 and +2 words), so `off` restores the exact original
+bytes. The cave is written first, then the site.
+
+Debugging: the demuxer's MKV log switches are bytes in its `.bss` (`/sys/module/splitter/sections/.bss`):
+`_fgCfaMkvDbgVideoLog` `+0x2723` and `_fgCfaMkvDbgLog` `+0x2725` (1 = on). With them on, an affected file logs
+`prCfaMkvInst->uArraysNs : 0x0` before the error.
 
 ## Part 3: subtitles (`subs.sh`)
 

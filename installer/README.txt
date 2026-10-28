@@ -3,6 +3,8 @@ https://github.com/fandangos/oppo-dv-mkv
 
 Since v1.6.0 the Dolby Vision MKV fix also makes the bars around a Dolby Vision picture that does not fill the
 screen (e.g. 3840x1600 films) true black instead of dark grey (visible on OLED TVs).
+Since v1.7.0 it also plays profile 5/8 MKVs remuxed from an hev1 MP4 (no VPS/SPS/PPS in the HEVC CodecPrivate)
+in Dolby Vision; before, such files played the stock way and had to be remuxed.
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every

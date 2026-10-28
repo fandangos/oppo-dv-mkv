@@ -19,3 +19,10 @@ for v in ru:0 us:0x90 d50:0x50 rel:0x1000; do
 done
 cp build/elfix-ru.bin build/elfix.bin; cp build/elfix-ru.elf build/elfix.elf
 md5sum build/elfix-*.bin
+# hvccfix.sh carries the splitter stub as hex: rebuild it from hvcc.S (cave .text+0x60904, tail .text+0x5e234) and compare
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c hvcc.S -o build/hvcc.o
+ld.lld -static -Ttext=0x60904 --defsym cont=0x5e234 -e hvcc_stub build/hvcc.o -o build/hvcc.elf
+llvm-objcopy -O binary -j .text build/hvcc.elf build/hvcc.bin
+H=$(od -An -v -tx1 build/hvcc.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' hvccfix.sh)00000000" ] || { echo "hvccfix.sh STUB does not match hvcc.S"; exit 1; }
+echo "hvccfix.sh stub matches hvcc.S"
