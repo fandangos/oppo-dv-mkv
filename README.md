@@ -767,6 +767,8 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
+/mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
+                                      file with it, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
 ```
 
@@ -811,8 +813,10 @@ each blob is printed. No firmware files are needed or included.
     a short patch in the video driver keeps the numbers small (`sarfix.sh`, part of the Dolby Vision MKV fix, every
     place checked before it is written). Square-pixel films are unchanged. See
     [fix 13](#13-non-square-pixels-stretched-to-169-v170).
-  - Updating from v1.6.0 adds `hvccfix.sh` and `sarfix.sh` and replaces `dvhook.sh` and `dvmkv.sh`; the other files
-    stay as they are.
+  - Some 192 kHz ALAC files (Apple encoder) crackled since firmware 65: the audio DSP gets the ALAC decoder of
+    firmware 56/60 back (part of the Dolby Vision MKV fix; only that decoder, built from the player's own file).
+  - Updating from v1.6.0 adds `hvccfix.sh`, `sarfix.sh` and the audio decoder file and replaces `dvhook.sh`,
+    `dvmkv.sh` and the boot wrapper; the other files stay as they are.
 - **v1.6.0: black letterbox bars in Dolby Vision.**
   - The bars around a Dolby Vision picture that does not fill the screen were dark grey (about 0.1 nit, visible on
     OLED). One instruction in the video driver makes them black (`bgfix.sh`, part of the Dolby Vision MKV fix, every

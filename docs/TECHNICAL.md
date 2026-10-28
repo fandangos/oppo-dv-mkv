@@ -18,6 +18,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
 | MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
+| ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
 
@@ -428,7 +429,21 @@ Workaround without the patch: set the stream's SAR to 1:1, for example `ffmpeg -
 hevc_mp4toannexb,hevc_metadata=sample_aspect_ratio=1/1 video.hevc`, then mux it again with mkvmerge (Dolby Vision
 and HDR10+ metadata stay in the stream).
 
-## Part 3: subtitles (`subs.sh`)
+## Part 2d: audio DSP decoders (`bdpaudec.db`, v1.7.0)
+
+`bdpdrv.ko` loads the audio DSP's decoder from `/res/bdpaudec.db` at the start of every playback
+(`i4LoadDecoderFromDb`): a u32 count, then entries `{char name[32]; u32 version; u32 sections; u32 offset}`; at the
+offset, per section a u32 size, the code and a u32 checksum. Firmware 65 changed three decoders: `alacdec`,
+`truehd_dec` and `EAC3dec_1st`. Its `alacdec` (same version number) is slower: 192 kHz/24-bit ALAC from Apple's
+encoder (predictor order 8) runs past the DSP's real-time limit and crackles. The same frames at a lower sample rate,
+and ffmpeg encodes (order 6 or less), play clean.
+
+`src/audio/alacdec.bin` is the `alacdec` entry of firmware 56 and 60 (identical in both). At install time the
+installer appends it to the player's own `bdpaudec.db` (only the stock v65 file, md5 `0abee82b…`, the same in every
+known region and on the CXUHD) and points entry 28 (`alacdec`, offset field at byte 1276) at it; the result must have
+md5 `31b1901f…`. Every other decoder, TrueHD and E-AC3 included, stays the firmware 65 one. The boot wrapper links
+`/res/bdpaudec.db` to that file (RAM only; not when a fail-safe skips the patches).
+
 
 It is gated on the `liblp.so` md5 and on a layout of the running player program (see
 [Player program layouts](#player-program-layouts)). It writes into the running player through `/proc/<pid>/mem`.
