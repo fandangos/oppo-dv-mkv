@@ -16,6 +16,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
+| Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
 | MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
@@ -385,6 +386,47 @@ bytes. The cave is written first, then the site.
 Debugging: the demuxer's MKV log switches are bytes in its `.bss` (`/sys/module/splitter/sections/.bss`):
 `_fgCfaMkvDbgVideoLog` `+0x2723` and `_fgCfaMkvDbgLog` `+0x2725` (1 = on). With them on, an affected file logs
 `prCfaMkvInst->uArraysNs : 0x0` before the error.
+
+## Part 2c: bdpdrv1 (non-square pixels stretched to 16:9, `sarfix.sh`, v1.7.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`).
+
+Where the sample aspect ratio goes: the HEVC SPS parser calls `vH265SetSampleAsp` (`0x7eb1f668`), which stores the
+SAR (from `aspect_ratio_idc`, or `sar_width`/`sar_height` for idc 255) at EsInfo `+0x16c`/`+0x170`.
+`vH265SetCurrFrameBufferInfo` copies it to the frame header (`+0xfc` SampleWidth, `+0x100` SampleHeight), next to
+the picture size (`+0xc2`/`+0xc4`) and the aspect-ratio code (`+0xe8` = EsInfo `+0xd9c`; for HEVC this is the
+middleware value EsInfo `+0xd94`, 0 for MKV; 0xd means the SAR came from the container, EsInfo `+0xe7c`/`+0xe7e`).
+Log (VDecPrintf mask 0x1000): `[H265] : eMWAsp[0], SampleWidth[1199], SampleHeight[1200], AspectRation[0]`.
+
+The bug: `_VdpUpdateFrameInfo` (`0x7e9b83d8`) sets the source shape for aspect code 0 to
+(SampleWidth × width, SampleHeight × height), unreduced, stores it at VDP path `+0x698`/`+0x69c` and passes it to
+`VDP_GetFixedRegion` (`0x7e9af770`). That compares it with the TV shape (16:9 here) and pads the source window by
+`size × (tvH × p6 − tvW × p7) / (tvW × p7)`, in unsigned 32-bit arithmetic. For 1199:1200 at 3840x1744 the shape is
+(4604160, 2092800); 1744 × 7952640 wraps, the padding is 29 lines instead of 414, and the output window becomes
+`(0, 17, 3840, 2125)` instead of `(0, 207, 3840, 1746)` (VDP log flags `0x400`/`0x800` and `+4` bit `0x100`:
+`SrcMax`, `A_B`, `FIX ASP`, `Fix ratio`). `u4VDP_DesiredResolution` (`0x7e9c172c`, called for every new picture)
+makes the same unreduced pair for the decoder's pre-scaling decision (`VDP_HalIsAbleToScale`). `VDP_SetupRegion` and
+`VDP_DecideSrcOutRegion` reuse `+0x698`/`+0x69c`. The products stay safe while both values are below about 4745
+(`VDP_GetFixedRegion` multiplies by a TV width of up to 221 and a picture size of up to 4096), which every 1:1 picture
+meets.
+
+The patch: site `0x7e9b8538` (`ldr r3, [r8, #0xfc]`, `fc3098e5` → `3054feea`) and site `0x7e9c187c`
+(`ldrh r2, [r6, #8]`, `b820d6e1` → `682ffeea`) branch to the stubs in `sar.S` at `0x7e94d600`, in the unused tail of
+`_Cmd_ImgResz_TestPerformance` (only the driver CLI table calls it; `p7kel.sh` uses its start up to `0x7e94d3e0`, the
+function ends at `0x7e94d728`). Each stub redoes the two multiplies, then calls `fit`: with
+`s = 20 − clz(a | b)`, if `s > 0` both values get `(x + 2^(s−1)) >> s`, so the larger one fits in 12 bits. Then it
+stores them where the stock code does and branches to the join (`0x7e9b8574`, `0x7e9c18c4`). r0–r3, ip and lr are
+free there because the other path into each join calls `VDP_GetSrcAspectRatio`. Pairs below 4096 are unchanged.
+
+`sarfix.sh` checks each branch with its aspect-code test and the code up to the first instruction after the join
+(68 and 84 bytes; no data addresses), both site words and the cave's 30 original words, which are the same in every
+known driver build; `off` restores them. The cave is written first, then the sites. A stub in the cave with one or
+no site redirected (an interrupted `on` or `off`) is reported as `partial` or `off`, and `on`/`off` complete it.
+`build.sh` assembles `sar.S` and checks it against the hex in `sarfix.sh`.
+
+Workaround without the patch: set the stream's SAR to 1:1, for example `ffmpeg -i in.mkv -map 0:v:0 -c copy -bsf:v
+hevc_mp4toannexb,hevc_metadata=sample_aspect_ratio=1/1 video.hevc`, then mux it again with mkvmerge (Dolby Vision
+and HDR10+ metadata stay in the stream).
 
 ## Part 3: subtitles (`subs.sh`)
 
