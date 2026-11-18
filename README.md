@@ -59,6 +59,7 @@ options without a USB stick (English only for now). See [Setup > Extras page](#s
 - [Oppo bugs fixed: subtitles and picture](#oppo-bugs-fixed-subtitles-and-picture)
 - [Better subtitles](#better-subtitles)
 - [MP4 files (v1.8.0)](#mp4-files-v180)
+- [Factory menu](docs/FACTORY.md)
 - [Video options (v2.0.2)](#video-options)
 - [Setup > Extras page (v2.1.2)](#setup--extras-page-v212)
 - [DLNA disc images (v2.1.0)](#dlna-disc-images-v210)
