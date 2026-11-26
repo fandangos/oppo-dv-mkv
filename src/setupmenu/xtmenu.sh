@@ -38,7 +38,7 @@ FPS="0x738230:4:24b4a87b14675a54d0a4aea707bb462c 0x7384cc:4:8f8864c066528789a467
 0x2a94c:12:f026759f7f63d653e81d170c8e1304f2 0x81bcf8:44:6421b82477de7f3b54866d5d4e32541f
 0x81c0bc:52:665244fa514c2ed554cc6281f25777a8"
 log(){ echo "$*"; }
-pid(){ ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}'; }
+pid(){ ps 2>/dev/null | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}'; }
 P=${OPPODV_PID:-$(pid)}
 [ -n "$P" ] || { log "player not running"; exit 1; }
 X=$PROC/$P/exe; M=$PROC/$P/mem
@@ -80,7 +80,7 @@ call(){ wr32 $((XL + 12)) $1; wr32 $((XL + 16)) ${2:-0}; wr32 $((XL + 20)) ${3:-
 loaded(){ [ "$(rdh $XM 4)" = 58544d4e ]; }
 st(){ loaded || { echo "not loaded"; return; }
   e=$(rd32 $((XM + 16))); [ $e -ge $((0x80000000)) ] && e=$((e - 0x100000000))
-  echo "status $(rd32 $((XM + 12))) err $e inserts $(rd32 $((XM + 132))) box $(rd32 $((XM + 140))) saves $(rd32 $((XM + 20)))/$(rd32 $((XM + 24))) live dv $(rd32 $((XM + 144))) l5 $(rd32 $((XM + 148))) fs $(rd32 $((XM + 176)))"; }
+  echo "status $(rd32 $((XM + 12))) err $e inserts $(rd32 $((XM + 132))) box $(rd32 $((XM + 140))) saves $(rd32 $((XM + 20)))/$(rd32 $((XM + 24))) live dv $(rd32 $((XM + 144))) l5 $(rd32 $((XM + 148))) fs $(rd32 $((XM + 176))) uop $(rd32 $((XM + 196))) bdr $(rd32 $((XM + 200)))"; }
 case "$CMD" in
 check) log "supported";;
 status) log "$(st)";;
@@ -103,7 +103,12 @@ on)
   a=$(sh $D/dvhook.sh dvaddr 2>/dev/null); case "$a" in ''|*[!0-9]*) a=0;; esac
   l=$(sh $D/dvcm.sh l5pa 2>/dev/null); case "$l" in ''|*[!0-9]*) l=0;; esac
   f=$(sh $D/dvhook.sh fsaddr 2>/dev/null); case "$f" in ''|*[!0-9]*) f=0;; esac
-  wrs $((XM + 36)) "$OPTS" 96; wr32 $((XM + 144)) $a; wr32 $((XM + 148)) $l; wrs $((XM + 152)) "$(printf '%s' "$2" | cut -c1-23)" 24; wr32 $((XM + 176)) $f
+  # autoABC / standalone UOPfree installed (see dvmkv.sh): the page only saves those two options, no live switch
+  UB=${OPPODV_UBI:-/mnt/ubi_boot}; ab=; [ -d $UB/autoABC ] && ab=1
+  uf=$ab; { [ -e $UB/UOPfree ] || [ -L $UB/UOPfree ] || [ -e $UB/bluray_uop ] || [ -L $UB/bluray_uop ]; } && uf=1
+  u=0; [ -f $D/uopfree.sh ] && [ -z "$uf" ] && u=$(sh $D/uopfree.sh addr 2>/dev/null); case "$u" in ''|*[!0-9]*) u=0;; esac
+  b=0; [ -f $D/bdregion.sh ] && [ -z "$ab" ] && b=$(sh $D/bdregion.sh addr 2>/dev/null); case "$b" in ''|*[!0-9]*) b=0;; esac
+  wrs $((XM + 36)) "$OPTS" 96; wr32 $((XM + 144)) $a; wr32 $((XM + 148)) $l; wrs $((XM + 152)) "$(printf '%s' "$2" | cut -c1-23)" 24; wr32 $((XM + 176)) $f; wr32 $((XM + 196)) $u; wr32 $((XM + 200)) $b
   call $(rd32 $((XM + 8))) 0 || exit 1
   [ "$RET" = 0 ] || { log "init failed: $(st)"; exit 1; }
   n=0; while [ "$(rd32 $((XM + 12)))" = 1 ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n + 1)); done

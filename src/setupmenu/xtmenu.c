@@ -82,14 +82,14 @@ _Static_assert(sizeof(struct item) == 0x14, "item");
 _Static_assert(sizeof(struct desc) == 0x38, "desc");
 
 // ---- the options --------------------------------------------------------------------------------------------------
-#define NOPT  12
+#define NOPT  14
 #define NVMAX 13
 #define OPT_H10 9                  /* rows hdr10plus, dynamic_hdr */
 #define OPT_DYN 10
 #define XT_ROW 6                   /* "Extras" goes before Exit */
 #define ID_PAGE 0x1f0              /* menu ids nobody uses (Setup's run 1..0xf8, other menus from 0x5dd) */
 #define ID_OPT0 0x1f1
-enum { LIVE_NONE, LIVE_DV, LIVE_L5, LIVE_FS, LIVE_H10 };
+enum { LIVE_NONE, LIVE_DV, LIVE_L5, LIVE_FS, LIVE_H10, LIVE_UOP, LIVE_BDR };
 struct opt {
     const char *key;
     const u16 *label, *help;
@@ -130,6 +130,10 @@ static const struct opt O[NOPT] = {
       { "dv", "hdr10plus" }, { u"Dolby Vision", u"HDR10+" }, { 0 } },
     { "audio_edid_override", u"Audio EDID Override",
       u"All audio formats, whatever the receiver reports (after a restart)", 2, 1, LIVE_NONE, ONOFF },
+    { "uop_free", u"UOP Free",
+      u"Remote keys work where a disc prohibits them (skip, menu, audio)", 2, 1, LIVE_UOP, ONOFF },
+    { "bd_region", u"Auto Region",
+      u"Blu-ray region A/B/C set from each disc (on: after a restart)", 2, 1, LIVE_BDR, ONOFF },
 };
 
 #include "xtext.h"
@@ -152,9 +156,11 @@ struct xhdr {
     char ver[24];                  // +152 oppo-dv-mkv version
     u32 fs_addr;                   // +176 dvhook's forced_subs byte (liblp), 0 = not on
     u8 cur[16];                    // +180 current values
+    u32 uop_addr;                  // +196 uopfree.sh's UOP mode word (player program), 0 = not supported
+    u32 bdr_addr;                  // +200 bdregion.sh's switch (the hook's enable word), 0 = the hook is not in
 };
 _Static_assert(NOPT <= 16, "cur");
-_Static_assert(__builtin_offsetof(struct xhdr, inserts) == 132 && __builtin_offsetof(struct xhdr, ver) == 152 && __builtin_offsetof(struct xhdr, fs_addr) == 176, "xtmenu.sh");
+_Static_assert(__builtin_offsetof(struct xhdr, inserts) == 132 && __builtin_offsetof(struct xhdr, ver) == 152 && __builtin_offsetof(struct xhdr, fs_addr) == 176 && __builtin_offsetof(struct xhdr, uop_addr) == 196 && __builtin_offsetof(struct xhdr, bdr_addr) == 200, "xtmenu.sh");
 __attribute__((section(".hdr"), used)) struct xhdr X = {
     0x4e4d5458, 2, xt_init, 0, 0, 0, 0, { 0 }, "/mnt/ubi_boot/oppo-dv-mkv/options.txt" };
 
@@ -338,6 +344,8 @@ static void apply_live(int i)
     int on = X.cur[i] == 0;
     if (O[i].live == LIVE_DV && X.dv_addr) *(volatile u8 *)X.dv_addr = on ? 0 : 1;
     if (O[i].live == LIVE_FS && X.fs_addr) *(volatile u8 *)X.fs_addr = on ? 1 : 0;
+    if (O[i].live == LIVE_UOP && X.uop_addr) *(volatile u32 *)X.uop_addr = on ? 1 : 0;   /* 1: nothing prohibited */
+    if (O[i].live == LIVE_BDR && X.bdr_addr) *(volatile u32 *)X.bdr_addr = on ? 1 : 0;   /* bdregiond follows it */
     if (O[i].live == LIVE_H10 && X.fs_addr)                   /* both rows: struct ml hopt = fopt + 0xd3 (mp4.c) */
         *(volatile u8 *)(X.fs_addr + 0xd3) = (X.cur[OPT_H10] ? 1 : 0) | (X.cur[OPT_DYN] ? 2 : 0);
     if (O[i].live == LIVE_L5 && X.l5_pa) {
