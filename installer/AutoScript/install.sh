@@ -7,8 +7,8 @@
 # older copy was installed). Why, per part: oppo-dv-mkv-result.txt in the root of the USB stick.
 # If AutoScript/CHECKONLY exists it only writes a compatibility report to the log and the result file, changing nothing.
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
-#   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
-#   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh,
+#   /mnt/ubi_boot/bdpprog.prev          the boot script of jb_overlay or autoABC, if one was installed first (the wrapper chains to it)
+#   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh, uopfree.sh, bdregion.sh (+ bdhook.bin/.sym, bdregiond, bdregion, bdhdmv, bdcallgraph), extsub.sh (+ extsub.bin, extmulti.bin),
 #                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, isomusic.sh, dlnaiso, dlnaiso.sh, smbbr, smbbr.sh, hdr10p.sh, audedid.sh,
 #                                       dmrhook.sh, dmrhook.bin, xtmenu.sh, xtload.bin, xtmenu.bin (Dolby Vision MKV fix),
 #                                       bootmsg.sh, bootmsg.bin (all), subs.sh,
@@ -47,6 +47,7 @@ result(){
     echo "Dolby Vision MKV fix:   $(line "$IN_DV" "$DV_R")"
     echo "Subtitle improvements:  $(line "$IN_SUBS" "$SUBS_R")"
     echo "Factory menu shortcut:  $(line "$IN_MENU" "$MENU_R")"
+    [ -n "$ABC$UOPF" ] && echo "Found: $ABC${ABC:+${UOPF:+, }}$UOPF - left as it is; oppo-dv-mkv's Auto Region / UOP Free stay off while it is installed."
     echo "Details: oppo-dv-mkv.log (same folder)."; } > $R; sync; }
 fail(){ echo "FAILED: $*"; [ -n "$WROTE" ] && echo "The boot wrapper was not (re)activated; the player keeps its previous behaviour." || echo "Nothing was changed."
   HEAD="FAILED: $*"; [ -n "$WROTE" ] || HEAD="${HEAD%.}. Nothing was changed."
@@ -55,6 +56,10 @@ fail(){ echo "FAILED: $*"; [ -n "$WROTE" ] && echo "The boot wrapper was not (re
 m5(){ md5sum "$1" 2>/dev/null | cut -d' ' -f1; }
 ours(){ grep -q "oppo-dv-mkv boot wrapper" $U/bdpprog 2>/dev/null; }
 overlay(){ grep -q "jb_overlay" $U/bdpprog 2>/dev/null; }   # jb_overlay mod (themes, ssh): we chain to it
+# autoABC (Blu-ray region) without jb_overlay: its launcher starts autoABC, then bdpprog.1; we chain to it too
+autoabc(){ grep -q "^# AUTOABC_MKV_" ${1:-$U/bdpprog} 2>/dev/null; }
+# the mod a boot script belongs to (chain target): $1 = the file
+modname(){ autoabc $1 && echo autoABC || echo jb_overlay; }
 # the player program that is running now (the overlay runs its own copy, not /usr/local/bin/bdpprog.1)
 running(){ [ -n "$OPPODV_RUNMD5" ] && { echo $OPPODV_RUNMD5; return; }; p=$(ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}'); [ -n "$p" ] && m5 /proc/$p/exe; }
 
@@ -85,10 +90,10 @@ PGCHECK=${OPPODV_PGCHECK:-sh $S/oppo-dv-mkv/xtmenu.sh check}  # Setup > Extras p
 NCHECK=${OPPODV_NCHECK:-sh $S/oppo-dv-mkv/smbbr.sh check}   # SMB2/SMB3 in the Network menu (DV part; no player program code)
 MCHECK=${OPPODV_MCHECK:-sh $S/oppo-dv-mkv/fpage.sh check}
 RUN=$(running)
-# boot hook: free, ours, or the jb_overlay mod (chained); anything else blocks every part
+# boot hook: free, ours, or the jb_overlay / autoABC launcher (chained); anything else blocks every part
 CHAIN=; HOOK=
 if [ -e $U/bdpprog ] && ! ours; then
-  if overlay; then CHAIN=1; else HOOK="$U/bdpprog already exists and belongs to another mod (custom firmware mods?). Not overwriting it."; fi
+  if overlay || autoabc; then CHAIN=1; else HOOK="$U/bdpprog already exists and belongs to another mod (custom firmware mods?). Not overwriting it."; fi
 fi
 ours && [ -f $PREV ] && CHAIN=1   # an install that already chains
 # per-part checks: an empty *_WHY means the part can be installed safely
@@ -143,7 +148,7 @@ if [ -e $S/CHECKONLY ]; then
   echo "launcher:  $(m5 $LAUNCHER), starts /mnt/ubi_boot/bdpprog: $(grep -q /mnt/ubi_boot/bdpprog $LAUNCHER 2>/dev/null && echo yes || echo NO)"
   echo "module:    $(grep '^bdpdrv1 ' $MODULES)"
   if [ -e $U/bdpprog ]; then
-    if ours; then echo "boot hook: oppo-dv-mkv installed"; elif overlay; then echo "boot hook: jb_overlay mod (oppo-dv-mkv would start first, then hand over to it)"
+    if ours; then echo "boot hook: oppo-dv-mkv installed"; elif overlay || autoabc; then echo "boot hook: $(modname $U/bdpprog) (oppo-dv-mkv would start first, then hand over to it)"
     else echo "boot hook: /mnt/ubi_boot/bdpprog belongs to ANOTHER mod"; fi
   else echo "boot hook: free"; fi
   [ -n "$DV_WHY" ] && [ -f $S/oppo-dv-mkv/p7kel.sh ] && grep -q "^bdpdrv1 .* 0x7e8d3000 " $MODULES && $KDIAG 2>&1 | sed 's/^/driver:    /'   # details for porting
@@ -175,25 +180,45 @@ waitload(){ w=0
   while [ $w -lt ${OPPODV_WAIT:-60} ] && loading; do w=$((w+1)); sleep 1; done
   [ $w = 0 ] || echo "waited $w s for the installed version to finish loading, uptime $(cut -d' ' -f1 /proc/uptime)s"; }
 
+# After a successful install or uninstall: a big message on screen until the player is restarted (bigmsg.sh keep, from a
+# copy in /tmp): remove the stick, unplug the player (a restart from software hangs in Oppo's shutdown while anything
+# runs from /mnt/ubi_boot; the front panel button is only standby). Only where it can be shown; nothing is kept on the
+# player, so it is gone after the restart.
+bigwarn(){
+  W=/tmp/oppo-dv-mkv-msg; rm -rf $W; mkdir $W || return 1
+  cp $S/oppo-dv-mkv/bigmsg.sh $S/oppo-dv-mkv/bigmsg.bin $W/ 2>/dev/null || return 1
+  for f in bigmsg.sh bigmsg.bin; do
+    [ "$(m5 $W/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] || return 1
+  done
+  sh $W/bigmsg.sh check >/dev/null 2>&1 || return 1
+  ( trap '' HUP; exec sh $W/bigmsg.sh keep "$1\n1. REMOVE THE USB STICK\n2. UNPLUG THE POWER CABLE FOR 10 SECONDS\n(THE POWER BUTTON IS NOT ENOUGH)" \
+      </dev/null >$W/bigmsg.log 2>&1 ) &
+  echo "  on screen until the player is restarted: remove the USB stick, unplug the power cable for 10 seconds"
+}
+
 # --- uninstall ---
 if [ -e $S/UNINSTALL ]; then
   if [ -e $U/bdpprog ] && ! ours; then fail "$U/bdpprog belongs to another mod; not touching it"; fi
   waitload
-  if [ -f $PREV ]; then   # give the boot hook back to the jb_overlay mod
+  if [ -f $PREV ]; then   # give the boot hook back to the mod we chained to (jb_overlay or autoABC)
+    PN=$(modname $PREV)
     cp $PREV $U/bdpprog.tmp && chmod 755 $U/bdpprog.tmp && sync && mv $U/bdpprog.tmp $U/bdpprog && sync && rm -f $PREV \
-      || fail "restoring the jb_overlay boot script"
-    echo "  jb_overlay boot script restored"
+      || fail "restoring the $PN boot script"
+    echo "  $PN boot script restored"
   else rm -f $U/bdpprog; fi
   sync; rm -rf $D; sync
-  echo "UNINSTALLED. Remove the USB stick and power-cycle the player: it is back to its previous behaviour."
+  echo "UNINSTALLED. Remove the USB stick and unplug the player's power cable for 10 seconds (the POWER button is not enough): it is then back to its previous behaviour."
   HEAD="UNINSTALLED. Power-cycle the player: it is back to its previous behaviour."
+  HEAD="UNINSTALLED. Remove the USB stick and unplug the player's power cable for 10 seconds (the POWER button is not enough): it is then back to its previous behaviour."
+  bigwarn "oppo-dv-mkv removed"
   DV_R="removed"; SUBS_R="removed"; MENU_R="removed"; result
   exit 0
 fi
 
 # --- install / update: the parts of this zip that passed their checks ---
 [ -n "$HOOK" ] && fail "$HOOK"
-[ -n "$CHAIN" ] && ! ours && echo "jb_overlay mod found: it keeps working, oppo-dv-mkv starts first and then hands over to it"
+CN=; [ -n "$CHAIN" ] && { ours && CN=$(modname $PREV) || CN=$(modname $U/bdpprog); }
+[ -n "$CHAIN" ] && ! ours && echo "$CN found: it keeps working, oppo-dv-mkv starts first and then hands over to it"
 echo "firmware: bdpprog.1 md5 $(m5 $PLAYER), running player program ${RUN:-unknown}"
 [ -n "$MENU" ] && [ -n "$MENU_NN" ] && { echo "  factory menu shortcut $MENU_NN"; MENU=; MENU_R=$MENU_NN; }
 [ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "video driver: $DVK" && echo "black letterbox bars: $($BCHECK 2>&1)" \
@@ -215,6 +240,14 @@ PAGE=; [ -n "$DV" ] && [ -z "$DV_WHY" ] && [ "$PGK" = supported ] && PAGE=1
 SMB=; [ -n "$DV" ] && [ -z "$DV_WHY" ] && [ "$NCK" = supported ] && SMB=1
 [ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "SMB2/SMB3 shares: $(echo ${NCK:-not in this zip})"
 BMSG=; [ "$BMCK" = supported ] && BMSG=1
+# autoABC / standalone UOPfree: left as they are (each has its own matching uninstaller, autoABC also changes
+# jb_overlay's brick_monitor); ours stay off while they are there (dvmkv.sh checks at every boot)
+ABC=; [ -d $U/autoABC ] && ABC="autoABC $(head -c 20 $U/autoABC/BUILD_ID 2>/dev/null | tr -cd '0-9A-Za-z._-')"
+UOPF=; { [ -e $U/UOPfree ] || [ -L $U/UOPfree ] || [ -e $U/bluray_uop ] || [ -L $U/bluray_uop ]; } && UOPF="standalone UOPfree"
+if [ -n "$DV" ] && [ -z "$DV_WHY" ]; then
+  [ -n "$ABC" ] && echo "Auto Region / UOP Free: $ABC is installed - it keeps doing the region switching$([ -n "$UOPF" ] || echo " and UOP free"); oppo-dv-mkv's own stay off while it is there. To use oppo-dv-mkv's instead: remove $ABC with its matching uninstaller (see autoABC's documentation), restart the player, then turn on bd_region / uop_free."
+  [ -z "$ABC" ] && [ -n "$UOPF" ] && echo "UOP Free: $UOPF is installed - oppo-dv-mkv's UOP Free stays off while it is there (remove it with its own uninstaller to use ours)."
+fi
 echo "boot message: $(echo ${BMCK:-not in this zip})"
 for p in DV SUBS MENU; do
   eval "on=\$$p; why=\$${p}_WHY"
@@ -226,13 +259,13 @@ done
 [ "$DV_R" = installed ] && { [ -n "$ISO" ] && DV_R="installed (with DLNA disc images" || DV_R="installed (DLNA disc images: not supported on this player program"
   [ -n "$PAGE" ] && DV_R="$DV_R; Setup > Extras page)" || DV_R="$DV_R; Setup page: not supported on this player program)"; }
 # jb_overlay's dark theme brings its own menu images: the subtitle colour squares keep the theme's colours there
-[ -n "$SUBS" ] && [ -n "$CHAIN" ] && SUBS_R="installed (with the jb_overlay dark theme the colour squares in the subtitle menu keep the theme's colours)"
+[ -n "$SUBS" ] && [ "$CN" = jb_overlay ] && SUBS_R="installed (with the jb_overlay dark theme the colour squares in the subtitle menu keep the theme's colours)"
 if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   echo "NOTHING TO INSTALL: this player does not need the factory menu shortcut (see above). Nothing was changed."
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh hdr10p.sh audedid.sh alacdec.bin vidopt.sh isomusic.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${SMB:+ smbbr smbbr.sh}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh hdr10p.sh audedid.sh uopfree.sh bdregion.sh bdhook.bin bdhook.sym bdregiond bdregion bdhdmv bdcallgraph alacdec.bin vidopt.sh isomusic.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${SMB:+ smbbr smbbr.sh}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin extsub.sh extsub.bin extmulti.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done) font.bin.gz}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
@@ -309,14 +342,16 @@ elif [ -e $D/subs.sh ] || [ -e $D/image_bdp83.bin ] || [ -e $D/font.bin ]; then
   rm -f $D/subs.sh $D/image_bdp83.bin $D/font.bin; echo "  subtitle improvements not installed now: older copy removed"
 fi
 rm -f $D/disable $D/bootcount
-if [ -n "$CHAIN" ] && ! ours; then   # keep the jb_overlay boot script; our wrapper runs it instead of the player
-  put $U/bdpprog $PREV || fail "saving the jb_overlay boot script"
+if [ -n "$CHAIN" ] && ! ours; then   # keep the jb_overlay / autoABC boot script; our wrapper runs it instead of the player
+  put $U/bdpprog $PREV || fail "saving the $CN boot script"
 fi
 put $S/oppo-dv-mkv/bdpprog $U/bdpprog || fail "writing $U/bdpprog"   # wrapper last: only active once all files are in
 sync
 WHAT=; [ -n "$DV" ] && WHAT="Dolby Vision MKV fix"; [ -n "$SUBS" ] && WHAT="${WHAT:+$WHAT + }subtitle improvements"
 [ -n "$MENU" ] && WHAT="${WHAT:+$WHAT + }factory menu shortcut"
 SKIP=; case "$DV_R$SUBS_R$MENU_R" in *NOT*) SKIP=1;; esac
-echo "INSTALLED $VERSION ($WHAT$([ -n "$CHAIN" ] && echo ", chained to jb_overlay"))$([ -n "$SKIP" ] && echo "; some parts were skipped, see oppo-dv-mkv-result.txt"). Remove the USB stick and power-cycle the player."
+echo "INSTALLED $VERSION ($WHAT$([ -n "$CHAIN" ] && echo ", chained to $CN"))$([ -n "$SKIP" ] && echo "; some parts were skipped, see oppo-dv-mkv-result.txt"). Remove the USB stick and unplug the player's power cable for 10 seconds (the POWER button is not enough)."
 echo "After the restart it is active at every boot; its log is $D/dvmkv.log on the player."
-HEAD="INSTALLED. Remove the USB stick and power-cycle the player."; result
+HEAD="INSTALLED. Remove the USB stick and unplug the player's power cable for 10 seconds (the POWER button is not enough)."
+bigwarn "oppo-dv-mkv $VERSION installed"
+result

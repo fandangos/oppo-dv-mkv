@@ -1,22 +1,29 @@
 #!/bin/sh
 # Build everything and assemble the release zips in dist/.
-# Needs: zig, lld, llvm, python3, zip   (nix shell nixpkgs#zig nixpkgs#lld nixpkgs#llvm nixpkgs#zip)
+# Needs: zig, lld, llvm, python3, zip, in the versions of flake.nix:  nix develop -c sh mkrelease.sh vX.Y.Z
+# (other versions: the code blobs may not fit their places; OPPODV_ANY_TOOLCHAIN=1 builds anyway, for testing)
 set -e
 cd "$(dirname "$0")"
+zv=$(zig version 2>/dev/null || echo none); lv=$(ld.lld --version 2>/dev/null | sed -n 's/^LLD \([0-9.]*\).*/\1/p')
+if [ "$zv" != 0.16.0 ] || [ "$lv" != 21.1.8 ]; then
+  echo "toolchain: zig $zv, lld ${lv:-none}; the releases are built with zig 0.16.0 and lld 21.1.8 (nix develop)"
+  [ -n "$OPPODV_ANY_TOOLCHAIN" ] || exit 1
+fi
 V=${1:-$(cat VERSION)}
-src/kernel/build.sh; src/liblp/build.sh; sh src/dlnaiso/build.sh; sh src/bootmsg/build.sh; sh src/setupmenu/build.sh; sh src/isomusic/build.sh; sh src/smb/build.sh
+src/kernel/build.sh; src/liblp/build.sh; sh src/dlnaiso/build.sh; sh src/bootmsg/build.sh; sh src/bigmsg/build.sh; sh src/bdregion/build.sh; sh src/bdregion/hook/build.sh; sh src/setupmenu/build.sh; sh src/subtitles/extsub/build.sh; sh src/isomusic/build.sh; sh src/smb/build.sh
 python3 src/kernel/mkkinst.py; python3 src/liblp/mkinstall.py
 rm -rf dist; mkdir -p dist
 mk(){  # $1 = zip name, $2 = parts (any of dv, subs, menu), $3 = flag file (UNINSTALL / CHECKONLY) or empty
   T=dist/stage; P=$T/AutoScript/oppo-dv-mkv; rm -rf $T; mkdir -p $P
   cp installer/AutoScript/AutoScript.TSS $T/AutoScript/
   sed "s/@VERSION@/$V/" installer/AutoScript/install.sh > $T/AutoScript/install.sh
-  cp installer/payload/bdpprog src/bootmsg/bootmsg.sh src/bootmsg/build/bootmsg.bin $P/
+  cp installer/payload/bdpprog src/bootmsg/bootmsg.sh src/bootmsg/build/bootmsg.bin src/bigmsg/bigmsg.sh src/bigmsg/build/bigmsg.bin $P/
   sed "s/@VERSION@/$V/" installer/payload/dvmkv.sh > $P/dvmkv.sh
-  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh src/kernel/bgfix.sh src/kernel/sarfix.sh src/kernel/arflag.sh src/kernel/dvexit.sh src/kernel/dvcm.sh src/kernel/hvccfix.sh src/kernel/ftrfix.sh src/kernel/mp4elfix.sh src/kernel/hdr10p.sh src/kernel/audedid.sh src/audio/alacdec.bin src/video/vidopt.sh src/isomusic/build/isomusic.sh $P/
+  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh src/kernel/bgfix.sh src/kernel/sarfix.sh src/kernel/arflag.sh src/kernel/dvexit.sh src/kernel/dvcm.sh src/kernel/hvccfix.sh src/kernel/ftrfix.sh src/kernel/mp4elfix.sh src/kernel/hdr10p.sh src/kernel/audedid.sh src/uopfree/uopfree.sh src/bdregion/bdregion.sh src/bdregion/hook/build/bdhook.bin src/bdregion/hook/build/bdhook.sym src/bdregion/build/bdregiond src/bdregion/build/bdregion src/bdregion/build/bdhdmv src/bdregion/build/bdcallgraph src/audio/alacdec.bin src/video/vidopt.sh src/isomusic/build/isomusic.sh $P/
     cp src/dlnaiso/build/dlnaiso src/dlnaiso/dlnaiso.sh src/dlnaiso/build/dmrhook.sh src/dlnaiso/build/dmrhook.bin $P/
     cp src/smb/build/smbbr src/smb/smbbr.sh $P/; cp src/smb/LICENCES.txt $T/oppo-dv-mkv-licences.txt
-    cp src/setupmenu/xtmenu.sh src/setupmenu/build/xtload.bin src/setupmenu/build/xtmenu.bin $P/;; esac
+    cp src/setupmenu/xtmenu.sh src/setupmenu/build/xtload.bin src/setupmenu/build/xtmenu.bin $P/
+    cp src/subtitles/extsub/extsub.sh src/subtitles/extsub/build/extsub.bin src/subtitles/extsub/build/extmulti.bin $P/;; esac
   case "$2" in *subs*) cp src/subtitles/subs.sh $P/
     for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $P/sq$q.png; done
     cp src/subtitles/font.bin.gz $P/;; esac

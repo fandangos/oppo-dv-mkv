@@ -31,6 +31,11 @@ options without a USB stick (English only for now). See [Setup > Extras page](#s
 **Plus SMB2 / SMB3 shares (v2.3.0):** servers without SMB1 (Windows, a NAS with SMB1 switched off) can be used from
 the player's own Network menu. See [SMB2 / SMB3 shares](#smb2--smb3-shares-v230).
 
+**Plus Auto Region, UOP Free and external subtitles for disc images (v2.4.0):** the region of each Blu-ray (A, B or
+C) set from the disc itself, remote keys where a disc forbids them, and several `.srt` files next to an ISO or a
+Blu-ray folder, each in the subtitle menu under its language. See [Auto Region and UOP Free](#auto-region-and-uop-free-v240)
+and [External subtitles for disc images](#external-subtitles-for-disc-images-v240).
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -70,6 +75,8 @@ the player's own Network menu. See [SMB2 / SMB3 shares](#smb2--smb3-shares-v230)
 - [SMB2 / SMB3 shares (v2.3.0)](#smb2--smb3-shares-v230)
 - [HDR10+ from MKV (v2.3.0)](#hdr10-from-mkv-v230)
 - [Audio EDID override (v2.3.0)](#audio-edid-override-v230)
+- [Auto Region and UOP Free (v2.4.0)](#auto-region-and-uop-free-v240)
+- [External subtitles for disc images (v2.4.0)](#external-subtitles-for-disc-images-v240)
 - [DLNA disc images (v2.1.0)](#dlna-disc-images-v210)
 - [Boot message (v2.1.0)](#boot-message-v210)
 - [Factory menu](#factory-menu)
@@ -436,6 +443,8 @@ the current value), OK on a value saves it, left goes back.
 | HDR10+ MKV | `hdr10plus` | at once, for the next file started |
 | Preferred HDR | `dynamic_hdr` | at once, for the next file started |
 | Audio EDID Override | `audio_edid_override` | after the next power-on |
+| UOP Free | `uop_free` | at once |
+| Auto Region | `bd_region` | off: at once; on: after the next power-on |
 
 A change is written to the installed options file (`/mnt/ubi_boot/oppo-dv-mkv/options.txt`) at once; comments and
 other lines in it stay. The help line at the bottom says what each row does; on the Extras row itself it shows the
@@ -529,6 +538,55 @@ reports. All or nothing. Video and HDR are not touched.
 
 Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 11.
 
+## Auto Region and UOP Free (v2.4.0)
+
+**Auto Region** (`bd_region`, off by default; also in Setup > Extras): the region of each Blu-ray (A, B or C) is read
+from the disc and set when it starts: physical discs, disc images (ISO) and Blu-ray folders, also over the network
+and DLNA. Discs that check the region in their menu program (HDMV) or in their Java program (BD-J) both work. Only
+the running player is changed: the player's own region setting stays as it is, and every new disc starts from it.
+
+**UOP Free** (`uop_free`, off by default; also in Setup > Extras, at once): remote keys work where a disc forbids them
+(user operation prohibitions): skip, menu, audio and subtitle changes during warnings, trailers and menus that block
+them. `off` = the disc's own rules.
+
+Both are ports of [autoABC and UOPfree by DamnFine815](https://github.com/DamnFine815/autoABC) (MIT): the same places
+in the player and the same detection, rewritten as our own C and assembly (no prebuilt binaries), and checked
+against the originals with thousands of generated test discs (no differences). RU 65-0131 player program family only.
+
+**With autoABC or standalone UOPfree installed:** the installer leaves them as they are and says so in its result
+file; oppo-dv-mkv's Auto Region / UOP Free then stay off at every boot (two would patch the same places), whatever
+the options say. To use ours instead, remove autoABC with **its own matching uninstaller** (see autoABC's
+documentation: it also changes jb_overlay's `brick_monitor`; never delete its files by hand), restart, and turn the
+options on. The boot wrapper is unchanged since v2.3.0, so autoABC 1.1.3 keeps recognising it.
+
+## External subtitles for disc images (v2.4.0)
+
+Disc images (ISO) and Blu-ray folders can have subtitle files next to them, named like the image, as Emby, Jellyfin
+and Plex name them:
+
+```
+Title.iso
+Title.srt             -> "Other"          (the player's own name for it, as before)
+Title.en.srt          -> "English"
+Title.eng.forced.srt  -> "English (Forced)"
+Title.pt-BR.srt       -> "Portuguese (BR)"
+Title.Spanish.ass     -> "Spanish"
+```
+
+Each file is its own entry at the end of the subtitle menu (after the disc's own subtitles), named by its language
+in the player's menu language. Languages: two- or three-letter codes (`en`, `eng`, `pt`, `por`, `pt-BR` ...) or the
+English name; `forced`, `sdh`, `cc` are shown in brackets. Types `.srt`, `.ass`, `.ssa`, `.smi`, up to 10 files.
+Until v2.3.0 the player took only `Title.srt` (one "Other" entry).
+
+Also fixed for these files: `<i>`, `</i>`, `<b>`, `<font ...>` and other tags are no longer drawn as text (the text is
+shown upright: the player does not draw italics here), and files with Unix line ends (LF) no longer lose the last
+character of every line.
+
+Option `ext_subs` (on by default); `off` = the player's own way. Several files need the Setup > Extras page
+(`setup_extras = on`): its loader maps the code. RU 65-0131 player program family only. Video files (MKV, MP4) are
+not affected: they have their own external-subtitle handling. The phone app's subtitle list (HTTP API) still shows
+one entry for the files.
+
 ## DLNA disc images (v2.1.0)
 
 The jailbroken Oppo plays disc images (ISO) from a USB disk or a network share with the jailbreak's ISO player,
@@ -568,7 +626,7 @@ its own popup (the bar Oppo uses for "Zoom is not available for Dolby Vision con
 
 | Message | Meaning |
 |---|---|
-| `oppo-dv-mkv v2.1.2-beta: all patches loaded` | every installed part loaded. `boot_message = off` hides it |
+| `OPPO-DV-MKV v2.4.0-beta` / `by Vitor Dall'Acqua` (two lines) | every installed part loaded. `boot_message = off` hides it (until v2.3.0: `oppo-dv-mkv <version>: all patches loaded`) |
 | `oppo-dv-mkv: NOT loaded: DV metadata, hvcC (see dvmkv.log)` | the named parts did not load; their lines in `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` say why. Shown also with `boot_message = off` |
 | `oppo-dv-mkv: patches skipped for this boot (fail-safe)` | the [fail-safe](#uninstall-and-emergency-off-switch) skipped the patches after two boots that were cut short; the next boot tries them again |
 
@@ -740,14 +798,16 @@ it privately.
 3. Power the player **off**. Plug the stick into the **rear** USB port, and make sure no other USB storage is
    connected. Power the player **on**.
    - At boot the player runs `AutoScript/install.sh` from the stick. It takes a second or two.
-4. When the home menu has been up for about 30 seconds, power the player **off** and remove the stick.
+4. When the home menu is up, the player shows a message that stays until you act on it (since v2.4.0):
+   **1. REMOVE THE USB STICK / 2. UNPLUG THE POWER CABLE FOR 10 SECONDS (THE POWER BUTTON IS NOT ENOUGH)**. Do
+   that: the power button only puts the player in standby, and the old patches stay in memory.
 5. (Optional) On a PC, open **`oppo-dv-mkv-result.txt`** in the root of the stick. Its first line says
    **`INSTALLED`** or **`FAILED`**, then one line per part: `installed`, `NOT installed` with the reason,
    `not needed` with the reason, or `not in this zip`. `FAILED` means nothing could be installed, and nothing was
    changed (`NOTHING TO INSTALL`: the player does not need what is in this zip, nothing was changed). The full log
    is `oppo-dv-mkv.log`.
-6. Power the player **on**. From now on the fix is applied automatically at every boot. About 25 seconds after
-   power-on the player shows `oppo-dv-mkv <version>: all patches loaded` for 10 seconds (see
+6. Plug the power cable back in and power the player **on**. From now on the fix is applied automatically at every
+   boot. About 25 seconds after power-on the player shows `OPPO-DV-MKV <version>` for 10 seconds (see
    [Boot message](#boot-message-v210)).
 
 The installer also works as an updater: running a newer release the same way replaces the files (it updates any
@@ -1986,8 +2046,14 @@ oppo-dv-mkv, and keeps working across oppo-dv-mkv updates. An extra is a folder:
 ## Building from source
 
 ```sh
-nix shell nixpkgs#zig nixpkgs#lld nixpkgs#llvm nixpkgs#zip -c ./mkrelease.sh   # or install zig, lld, llvm, zip yourself
+nix develop -c sh mkrelease.sh vX.Y.Z      # the pinned toolchain of flake.nix: zig 0.16.0 (clang 21.1.8), lld 21.1.8
 ```
+
+**Use these versions.** Several code blobs fill their places in the player's programs to within a few bytes (the
+text-subtitle blob has 6 to 26 bytes to spare), so another compiler can make one not fit ("text subtitle blob does
+not fit vMPCMpgFilePbTest"). `mkrelease.sh` checks the versions first and stops on others
+(`OPPODV_ANY_TOOLCHAIN=1` builds anyway, for testing only). Without Nix: install exactly zig 0.16.0, lld 21.1.8,
+llvm, python3 and zip.
 
 `mkrelease.sh` compiles both patch blobs (`src/liblp`, `src/kernel`), generates the on-device patchers
 (`mkinstall.py`, `mkkinst.py`) and builds the release zips into `dist/`. The builds are reproducible: the md5 of
@@ -2000,6 +2066,8 @@ each blob is printed. No firmware files are needed or included.
   [FFmpeg](https://ffmpeg.org/), [tsMuxeR](https://github.com/justdan96/tsMuxer) and
   [Ghidra](https://ghidra-sre.org/), used to make the test files and to analyse the firmware.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
+- Auto Region and UOP Free (v2.4.0): ideas, places and detection from
+  [autoABC and UOPfree](https://github.com/DamnFine815/autoABC) by DamnFine815 (MIT), rewritten as own source.
 - The black letterbox bar fix (v1.6.0) was found and tested by a user in
   [issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5).
 
@@ -2015,6 +2083,28 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.4.0-beta: Auto Region, UOP Free, several external subtitles for disc images, install message.** A beta: tested
+  on one player (RU).
+  - **Auto Region** (`bd_region`, off; also in Setup > Extras): the region of each Blu-ray set from the disc (HDMV and
+    BD-J; physical discs, ISO, folders, network, DLNA). **UOP Free** (`uop_free`, off; also in Setup > Extras): remote
+    keys where a disc forbids them. Ports of autoABC / UOPfree (DamnFine815, MIT) as own source. With autoABC or
+    standalone UOPfree installed, those are left alone and ours stay off. See
+    [Auto Region and UOP Free](#auto-region-and-uop-free-v240).
+  - **External subtitles for disc images and Blu-ray folders** (`ext_subs`, on): `Title.en.srt`, `Title.pt.srt` ...
+    each its own subtitle menu entry with its language; tags such as `<i>` no longer drawn as text; LF-only files
+    keep the last character of each line. See [External subtitles for disc images](#external-subtitles-for-disc-images-v240).
+  - **Install message:** after installing or uninstalling, the player shows until it is unplugged: "1. REMOVE THE USB
+    STICK / 2. UNPLUG THE POWER CABLE FOR 10 SECONDS (THE POWER BUTTON IS NOT ENOUGH)".
+  - **Boot message:** two lines, `OPPO-DV-MKV <version>` / `by Vitor Dall'Acqua`. A message whose popup did not come up
+    in time could block every later message until the next restart; fixed.
+  - **autoABC's MKV-only mode** (its launcher in `bdpprog.prev`): uninstalling oppo-dv-mkv and installing it again was
+    refused ("belongs to another mod"); the installer now chains to it like to jb_overlay.
+  - **Building:** the toolchain is pinned (`flake.nix`, `nix develop`) and checked by `mkrelease.sh`; other compiler
+    versions could cause "text subtitle blob does not fit". See [Building from source](#building-from-source).
+  - Updating adds `uopfree.sh`, `bdregion.sh` (+ `bdhook.bin`, `bdhook.sym`, `bdregiond`, `bdregion`, `bdhdmv`,
+    `bdcallgraph`), `extsub.sh` (+ `extsub.bin`, `extmulti.bin`) and replaces `dvmkv.sh`, the boot message's and the
+    Extras page's files. The boot wrapper is unchanged.
 
 - **v2.3.0-beta: HDR10+ from MKV; SMB2 / SMB3 shares; Extras page scrolling; updating.** A beta: tested on one player (RU).
   - **HDR10+:** the player's driver can send HDR10+, but MKV files were always handed on as HDR10. HEVC MKV files with HDR10+

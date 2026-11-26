@@ -1480,3 +1480,47 @@ python3 unwraprest.py in.hevc out.hevc
 A single-stream P7 TS with a DOVI descriptor, built from the output, plays as FEL Dolby Vision on **stock** firmware.
 It does not help with MKV, because the MKV splitter then puts the unwrapped EL slices into the base layer. It is
 kept for reference only.
+
+## Part 12: UOP Free and Auto Region (`uopfree.sh`, `bdregion.sh`, `bdhook.bin`, `bdregiond`, v2.4.0)
+
+Ports of autoABC / UOPfree (DamnFine815, MIT), as own source in `src/uopfree` and `src/bdregion`.
+
+- **UOP Free:** the word at `0x1281638` in the player program (0 = the disc's rules, 1 = free, 2 = everything
+  prohibited) is read at every key; `uopfree.sh` sets it to 1. The Extras row writes it at once.
+- **Auto Region:** the region code byte at `0x12346fc` (01 A, 02 B, 03 C, ff = the player's own) is copied to PSR20
+  only when a disc loads. `bdhook.bin` (at `0x1c03a00`) has two parts: a branch at the start of
+  `Java_org_bluray_system_RegisterAccess_nGetPSR` (`0x2aefc0`) that answers PSR20 for physical BD-J discs from a
+  mailbox the daemon fills (8 s time-out, then the original), and a wrapper on the `ipcd_exec` GOT entry
+  (`0x11d8e40`) that, after the player mounts a disc image on `/mnt/iso` or links a folder to `/mnt/link`, asks the
+  daemon to set the region before the disc starts. `bdregiond` finds the region with `bdregion` (HDMV region program
+  simulation, BD-J configuration files and `()Z` region methods in a small JVM), `bdhdmv` (the two common HDMV
+  patterns) and `bdcallgraph` (BD-J call graph), each checked against the original tools with thousands of generated
+  discs (0 differences).
+- With `/mnt/ubi_boot/autoABC` (or a standalone UOPfree: `/mnt/ubi_boot/UOPfree`, `bluray_uop`) present, `dvmkv.sh`
+  starts neither, and the Extras page only saves the options.
+
+## Part 13: external subtitles of disc images (`extsub.sh`, `extsub.bin`, `extmulti.bin`, v2.4.0)
+
+The player's disc module (`playback_disc_extern_subtitle.c`, `0x93ee00`-`0x941960`, state at `0x134d2e0`) has its
+own external-subtitle path for discs, separate from liblp's for video files. At disc start `FUN_0093f464(path)`
+turns `Title.iso` (or a folder `Title`) into `Title.srt`, then `.ssa`, `.ass`, `.smi`, keeps the first that exists
+at `+0x4d4` and its type at `+0x4d0`. Every subtitle list then adds **one** entry after the disc's own streams
+(byte `0x1970136`), named "Other"; choosing it starts `SubParseThread` (`0x940bf8`), which parses the file into a
+list of cues at `+0x4e0` (records of 0x114 bytes: start ms, end ms, 256 bytes of text, length, index, next).
+
+- **Tags:** the SRT (`0x940050`, UTF-16 `0x940230`) and SSA/ASS (`0x93fea0`) parsers only skipped one `<i>`, `<b>`,
+  `<u>` or `<font ` at the start of a line; their cue clean-up `0x93fc58` (142 bytes: `\N` line breaks, `{\...}`
+  blocks) is replaced by `extsub.bin` (140 bytes), which also removes every `<tag ...>` and `</tag>`.
+- **LF line ends:** the SRT parser reads lines with `fgets` and writes a space over `s[len-2]` when the line ends in
+  `\n` **or** `s[len-2]` is `\r`; for LF-only files that was the last character. The branch at `0x940148` (`bne` ->
+  `b`) leaves only the `\r` case.
+- **Several files:** `extmulti.bin` sits in a 64 KiB RWX region at `0x1b90000`, mapped through the Extras page's
+  loader stub. `es_setpath` replaces `FUN_0093f464` (an 8-byte `ldr.w pc, [pc, #k]` jump at its start): it lists
+  the folder, keeps `Title.*.{srt,ass,ssa,smi}` (bare name first), reads the language from the name (ISO 639-1 / 639-2
+  through the player's own tables `0xac7b48` / `0xac7b88`, or the English name) and puts the first file at `+0x4d4`
+  as before. Eight more jumps make the lists count N files instead of one and name them: the popup's build
+  (`0xa93c58`) and refresh (`0xa94772`), the name function `0xa936ac` (`0xa93748` total, `0xa93768` the file
+  entries' names), the selection (`0xa942ac` current entry, `0xa94344`: a file entry points `+0x4d4` at that file,
+  through `c_mem_alloc`, and starts the parse thread) and the info banner (`0x8f4806` name, `0x8f4b90` total). Each
+  place is checked against its original 8 bytes; `extsub.sh off` puts them back. The phone app's list
+  (`bd_request_get_subtt_menu_list`, `0xaadd54`) still counts one file.

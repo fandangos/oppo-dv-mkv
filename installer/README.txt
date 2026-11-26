@@ -37,6 +37,12 @@ HEVC MKV files with HDR10+ play in HDR10+ on a TV that has it (hdr10plus = off: 
 Dolby Vision too, dynamic_hdr = dv or hdr10plus chooses when the TV has both. audio_edid_override = on (off as shipped): all audio
 formats whatever the receiver reports, for a zone 2 that reports stereo; untested on a real one, and a device that cannot
 decode them gives silence or noise.
+Since v2.4.0 (beta): bd_region = on (off as shipped): the region of each Blu-ray (A/B/C) is set from the disc itself.
+uop_free = on (off as shipped): remote keys work where a disc forbids them. Both also in Setup > Extras; ports of
+autoABC / UOPfree by DamnFine815 (MIT). With autoABC or standalone UOPfree installed, those are left as they are and
+ours stay off. ext_subs (on): several subtitle files next to a disc image or Blu-ray folder (Title.srt, Title.en.srt,
+Title.pt-BR.srt ...), each in the subtitle menu under its language; <i> and other tags no longer drawn as text.
+The boot message now reads "OPPO-DV-MKV <version>" / "by Vitor Dall'Acqua".
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every
@@ -71,12 +77,13 @@ INSTALL
   1. Copy the contents of this zip (the AutoScript folder and this file) to the ROOT of the USB stick.
   2. Power the player OFF, plug the stick into the REAR USB port, power the player ON.
      At boot the player runs AutoScript/install.sh from the stick (takes a second or two).
-  3. Wait until the home menu has been up for about 30 seconds, power the player OFF and remove the stick.
+  3. When the home menu is up the player shows "1. REMOVE THE USB STICK / 2. UNPLUG THE POWER CABLE FOR 10 SECONDS":
+     remove the stick and unplug the power cable for 10 seconds (the POWER button only puts it in standby).
   4. Optional: open oppo-dv-mkv-result.txt in the root of the stick on a PC. First line INSTALLED or FAILED, then one
      line per part: installed / NOT installed (with the reason) / not needed (with the reason) / not in this zip.
      First line NOTHING TO INSTALL: this player does not need what is in this zip, nothing was changed.
      Full log: oppo-dv-mkv.log.
-  5. Power the player ON. The fix is now active at every boot.
+  5. Plug the power cable back in and power the player ON. The fix is now active at every boot.
 
 UNINSTALL
   Use the oppo-dv-mkv-*-uninstall.zip release the same way (log ends with "UNINSTALLED").

@@ -83,6 +83,28 @@ audio_edid_override = off
 #   fix. off = the player's own network code only.
 smb23 = on
 #
+# uop_free = on | off
+#   Remote keys work where a disc prohibits them (user operation prohibitions): skip, menu, audio and subtitle changes
+#   during warnings, trailers and menus that block them. RAM only. Can also be switched on the player (Setup > Extras),
+#   at once. off = the disc's own rules. Idea: UOPfree by DamnFine815 (MIT). RU 65-0131 player program family only.
+uop_free = off
+#
+# bd_region = on | off
+#   Auto Region: the region of each Blu-ray (A, B or C) is read from the disc and set when it starts: physical discs,
+#   disc images (ISO) and BDMV folders, also over the network and DLNA. RAM only; the player's own region setting is
+#   not changed. off = the player's own region for every disc. Switched off at once on the player (Setup > Extras);
+#   on takes effect after a restart. Idea and places: autoABC by DamnFine815 (MIT). RU 65-0131 player program family.
+bd_region = off
+#
+# ext_subs = on | off
+#   External subtitles of disc images (ISO) and Blu-ray folders, next to them with the same name: several files, each
+#   its own entry in the subtitle menu named by its language, like Emby / Jellyfin / Plex name them:
+#   Title.srt (shown as "Other"), Title.en.srt, Title.eng.srt, Title.pt-BR.srt, Title.English.srt, Title.en.forced.srt
+#   (.srt .ass .ssa .smi, up to 10). Tags such as <i> </i> <b> <font ...> are no longer drawn as text, and files with
+#   Unix line ends (LF) no longer lose the last character of each line. Several files need setup_extras = on.
+#   off = the player's own: one file (Title.srt), tags as text. RAM only. RU 65-0131 player program family only.
+ext_subs = on
+#
 # setup_extras = on | off
 #   The "Extras" page in the player's Setup menu (between Network Setup and Exit) to change these options on the
 #   player. off = Oppo's Setup menu as it is. RU 65-0131 player program and its jailbreak copies only.

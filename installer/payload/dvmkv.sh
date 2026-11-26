@@ -8,6 +8,11 @@ log(){ echo "[$(cut -d' ' -f1 /proc/uptime)] $*"; }
 opt(){ [ -f $D/options.txt ] && tr -d '\r' < $D/options.txt | grep -v '^[[:space:]]*#' \
   | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p" | sed -n '$p' | tr A-Z a-z; }
 FAIL=   # the parts that did not load this boot (named in the boot message)
+# autoABC / standalone UOPfree (DamnFine815) installed: they switch the region and the UOP word themselves; ours stay off
+# (two would patch the same places). Their markers: /mnt/ubi_boot/autoABC (BUILD_ID), /mnt/ubi_boot/UOPfree, bluray_uop.
+UB=${OPPODV_UBI:-/mnt/ubi_boot}
+abc(){ [ -d $UB/autoABC ] && echo "autoABC $(head -c 20 $UB/autoABC/BUILD_ID 2>/dev/null | tr -cd '0-9A-Za-z._-')"; }
+uopf(){ abc || { { [ -e $UB/UOPfree ] || [ -L $UB/UOPfree ] || [ -e $UB/bluray_uop ] || [ -L $UB/bluray_uop ]; } && echo "UOPfree"; }; }
 # run NAME LABEL COMMAND...: log the command's lines as "NAME: ..."; a non-zero exit, or a line that reports a failure,
 # means the part did not load. "not supported on this player program" is not a failure: that is known at install time.
 run(){ n=$1; t=$2; shift 2
@@ -28,6 +33,10 @@ n=0; while :; do
   n=$((n+1)); [ $n -gt 120 ] && { log "player not found"; exit 1; }; sleep 1
 done
 log "player pid $P"
+# Auto Region: early, before a disc in the tray starts (its BD-J asks for the region through the hook's gate)
+if [ -f $D/bdregion.sh ] && [ "$(opt bd_region)" = on ]; then
+  a=$(abc); if [ -n "$a" ]; then log "bdregion: off ($a is installed and switches the region)"; else run bdregion "Auto Region" sh $D/bdregion.sh on; fi
+fi
 # video options at once (they patch the program itself, no library needed): the player picks its first HDMI output
 # (home menu refresh) a few seconds after it starts and keeps it until something is played
 [ -f $D/vidopt.sh ] && run video "video options" sh $D/vidopt.sh apply $D/options.txt   # 25p/30p, menu refresh, default language
@@ -64,6 +73,9 @@ if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4 / MKV: which aud
   [ -n "$c" ] && run dvhook "languages" sh $D/dvhook.sh langs $c
 fi
 [ -f $D/dvhook.sh ] && [ "$(opt forced_subs)" = on ] && run dvhook "forced subtitles" sh $D/dvhook.sh forced on   # MKV: forced subtitles only
+if [ -f $D/uopfree.sh ] && [ "$(opt uop_free)" = on ]; then   # remote keys where a disc prohibits them
+  a=$(uopf); if [ -n "$a" ]; then log "uopfree: off ($a is installed)"; else run uopfree "UOP Free" sh $D/uopfree.sh on; fi
+fi
 [ -f $D/isomusic.sh ] && run isomusic "ISO under Music" sh $D/isomusic.sh on   # ISO files in the Music lists too (jailbreak programs)
 [ -f $D/bdpaudec.db ] && log "audio: /res/bdpaudec.db -> $(ls -l /res/bdpaudec.db 2>/dev/null | sed 's/.*-> //')"   # set by the wrapper
 [ -f $D/subs.sh ] && run subs "subtitles" sh $D/subs.sh                   # improved subtitles
@@ -78,11 +90,17 @@ if [ -f $D/xtmenu.sh ]; then
   if [ "$(opt setup_extras)" = off ]; then log "xtmenu: off (setup_extras = off)"
   else run xtmenu "Setup page" sh $D/xtmenu.sh on "$VERSION"; fi
 fi
+# external subtitles of disc images / Blu-ray folders: tags, LF line ends, several files (Title.en.srt ...). After
+# the Extras page: the several-files code is mapped through its loader stub.
+if [ -f $D/extsub.sh ]; then
+  if [ "$(opt ext_subs)" = off ]; then log "extsub: off (ext_subs = off)"
+  else run extsub "external subtitles" sh $D/extsub.sh on; fi
+fi
 # boot message: what loaded, in the player's own tip popup. A failure is always shown; "all loaded" unless
 # boot_message = off. In the background: it waits until the popup has gone again (about 10 s).
 if [ -f $D/bootmsg.sh ]; then
   if [ -n "$FAIL" ]; then m="oppo-dv-mkv: NOT loaded: $FAIL (see dvmkv.log)"
-  elif [ "$(opt boot_message)" != off ]; then m="oppo-dv-mkv $VERSION: all patches loaded"; else m=; fi
+  elif [ "$(opt boot_message)" != off ]; then m="OPPO-DV-MKV $VERSION\nby Vitor Dall'Acqua"; else m=; fi
   [ -n "$FAIL" ] && log "not loaded: $FAIL"
   [ -n "$m" ] && ( sh $D/bootmsg.sh show "$m" 10000 2>&1 | while read l; do log "message: $l"; done ) &
 fi
