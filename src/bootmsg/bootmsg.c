@@ -30,6 +30,19 @@ __attribute__((section(".hdr"), used)) struct hdr bm = { 0x47534d42 };
 #define BAR_R 1520
 #define BAR_H 120
 
+// the tip's text is single-line: its style (content object: widget object +0x80 -> +0x40) gets the WGL multi-line bit
+// (0x20) and "\n ends a line" (0x40000), only when it is the value we know (as bigmsg). It stays so until the next boot.
+#define HTYPE_OBJ  ((int (*)(u32, unsigned short *, u32 *))0x00784ccc)   /* handle_get_type_obj */
+static void multiline(void)
+{
+    unsigned short t = 0;
+    u32 obj = 0, cnt;
+    volatile u32 *st;
+    if (HTYPE_OBJ(TEXT, &t, &obj) || t != 0x3c5 || !obj || !(cnt = *(volatile u32 *)(obj + 0x80))) return;
+    st = (volatile u32 *)(cnt + 0x40);
+    if ((*st & ~0x00040020u) == 0x00508001u) *st |= 0x00040020u;
+}
+
 static void show(void)
 {
     unsigned short w[128];
@@ -38,6 +51,7 @@ static void show(void)
     if (n > 120) n = 120;
     for (u32 i = 0; i < 128; i++) w[i] = 0;
     PS_TO_W2S(bm.text, w, n);
+    multiline();
     WGL_DO_CMD(TEXT, SETTEXT, w, W2S_STRLEN(w) & 0xffff);
     WGL_VIS(ICON, 2);
     r[0] = BAR_L; r[1] = bm.y; r[2] = BAR_R; r[3] = bm.y + BAR_H;

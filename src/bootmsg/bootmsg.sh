@@ -1,6 +1,6 @@
 #!/bin/sh
 # oppo-dv-mkv: one line of text on screen, in the player's own tip popup (RAM only).
-# usage: sh bootmsg.sh check | show "TEXT" [MS] | status
+# usage: sh bootmsg.sh check | show "TEXT" [MS] | status      TEXT: "\n" starts a new line
 # While a message is pending, the player program's usleep import points at the stub (bootmsg.bin, in the
 # jailbreak's free .text1 tail at 0x1c07800); it is put back as soon as the popup has been shown and then reset
 # (bar back in its place, its icon visible again). Only the RU 65-0131 player program and its jailbreak copies
@@ -13,13 +13,14 @@ Y=437   # bar top inside the tip frame (frame at 100,43): the 120-pixel bar is c
 # fingerprints (file offset:length:md5 of the running program): the stock tip function, its two hide callbacks,
 # the show-with-timeout helper, the code that creates the bar (its place is restored), the exported stubs used
 # (c_strlen, c_uc_ps_to_w2s, c_uc_w2s_strlen, c_wgl_do_cmd, c_wgl_move, c_wgl_set_visibility, x_timer_start/stop)
-# and the usleep PLT entry (it loads the GOT slot above)
+# and the usleep PLT entry (it loads the GOT slot above), handle_get_type_obj (the text is made multi-line)
 FPS="0x804dcc:784:061a4c0531374fd13930d82c6c9693da 0x804d34:152:adedffa57181ff57f7d263c0281be4df
 0xac0344:64:68b6fdde3e8a9a935eacd25385f6a74f 0x80bf88:352:a00f5c700f3de36e6f0acd91476c685f
 0x46dea0:4:c02c38205cb82ae53592508e0cdca354 0x62dddc:4:df8266e7356e8c9f70b52c728edc0714
 0x62dde8:4:6bd64aeb3183bf90adf086bfea3856d7 0x738230:4:24b4a87b14675a54d0a4aea707bb462c
 0x7382f0:4:964b9281e740bbf5bb9145d1fc2dd711 0x7384cc:4:8f8864c066528789a4678b5e9b1c5cc9
-0xb62dfc:8:f07e5b7e8ead5b32260b676cde94804c 0x2a94c:12:f026759f7f63d653e81d170c8e1304f2"
+0xb62dfc:8:f07e5b7e8ead5b32260b676cde94804c 0x2a94c:12:f026759f7f63d653e81d170c8e1304f2
+0x77cccc:8:7a54d48576bf86d797e22ce427b0608a"
 log(){ echo "$*"; }
 pid(){ ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}'; }
 P=${OPPODV_PID:-$(pid)}; n=0
@@ -45,7 +46,7 @@ case "$CMD" in
 check) [ $(cave) = none ] && { log "no free place in this player program"; exit 1; }; log "supported";;   # the place itself is checked by "show"
 status) log "cave $(cave), usleep import $(printf %x $(rd32 $GOT)), state $(rd32 $((BM + 4))), shows $(rd32 $((BM + 16)))";;
 show)
-  T=$(printf '%s' "$2" | tr -cd ' -~' | cut -c1-120); MS=${3:-10000}
+  T=$(printf '%b' "$2" | tr -cd ' -~\n' | head -c 120)   # "\n": a new line; MS=${3:-10000}
   # the popup exists once the player has built its widgets; at boot, wait for the home menu too (25 s of uptime)
   n=0; while [ "$(rd32 $((0x1344c74)))" = 0 ] && [ $n -lt 120 ]; do sleep 1; n=$((n + 1)); done
   [ "$(rd32 $((0x1344c74)))" != 0 ] || { log "the player's popup does not exist, no message"; exit 1; }
@@ -55,8 +56,11 @@ show)
   ours) ;;
   *) log "place $(printf %x $BM) in use by something else, no message"; exit 1;;
   esac
-  case "$(rd32 $((BM + 4)))" in 0|3|6) ;; *) log "a message is being shown"; exit 1;; esac
-  g=$(rd32 $GOT)
+  g=$(rd32 $GOT); st=$(rd32 $((BM + 4)))
+  # a request only moves on while the usleep import points at the stub: one left pending without it (a show that timed
+  # out and put the import back) can never finish, and would block every later message until the next boot
+  case "$st" in 0|3|6) ;; *) [ "$g" = $HOOK ] && { log "a message is being shown"; exit 1; }
+    log "state $st left by an earlier message (nothing pending): taken over"; wr32 $((BM + 4)) 6;; esac
   if [ "$g" != $HOOK ]; then
     [ $g -ge $((0x40000000)) ] || { log "usleep import not resolved ($(printf %x $g)), no message"; exit 1; }
     wr32 $((BM + 8)) $g
