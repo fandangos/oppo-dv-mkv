@@ -62,6 +62,20 @@ for acute, cp in (('oacute', 0x151), ('uacute', 0x171), ('Oacute', 0x150), ('Uac
 for cp, ced in ((0x218, 0x15e), (0x219, 0x15f), (0x21a, 0x162), (0x21b, 0x163)):
     if cp not in ca and ced in ca: newmap[cp] = ca[ced]
 
+# Czech / Slovak d t l L with caron (ď ť ľ Ľ): the font draws a full caron above them; these four take the
+# apostrophe-like caron beside the stem (Ď and the others keep the full one). Base letter + the font's own
+# quoteright, a little smaller, right of the stem's top (ascender height, cap height for Ľ).
+q = contours(ga['quoteright']); qx0 = min(x for c in q for x, y in c[0]); qy1 = max(y for c in q for x, y in c[0])
+QS = 0.8
+for cp, base, top, gap in ((0x10f, 'd', 738, 40), (0x165, 't', 738, 30), (0x13e, 'l', 738, 40), (0x13d, 'L', 683, 40)):
+    name = ca[cp]; basec = contours(ga[base])
+    ymax = max(y for c in basec for x, y in c[0])
+    stem = max(x for c in basec for x, y in c[0] if y >= ymax * 0.9)              # right edge of the stem's top
+    acc = [([(round(stem + gap + (x - qx0) * QS), round(top + (y - qy1) * QS)) for x, y in p], f) for p, f in q]
+    ga[name] = from_contours(basec + acc); ga[name].recalcBounds(ga)
+    adv = max(a['hmtx'][base][0], ga[name].xMax + 30)
+    a['hmtx'][name] = (adv, ga[name].xMin)
+
 # Traditional Chinese (Big5 level 1) from font_sub, scaled by the em ratio and matched on a shared character
 def bounds(font, glyf, name):
     g = glyf[name]; g.recalcBounds(glyf); return g.xMin, g.yMin, g.xMax, g.yMax
@@ -98,6 +112,7 @@ if 'vmtx' in a:
     for n in newmap.values():
         if n not in a['vmtx'].metrics: a['vmtx'][n] = (adv, 0)
 a['maxp'].recalc(a)
+a.recalcTimestamp = False   # keep the original font's dates: the same inputs give the same file
 buf = io.BytesIO(); a.save(buf); body = buf.getvalue()
 open(out, 'wb').write(bytes.fromhex('0100000008000000') + struct.pack('>I', len(body)) + body)
 print('added', len(newmap), 'code points:', sum(1 for c in newmap if c >= 0x3000), 'CJK; scale', round(ky, 4),

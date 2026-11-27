@@ -18,7 +18,7 @@ PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
 PREV=${OPPODV_PREV:-/mnt/ubi_boot/bdpprog.prev}
 [ -f $PREV ] && PLAYER=$PREV
 # Replacement resources name:md5 - each swapped into /res only if its md5 matches (RAM only: /res is rebuilt at boot)
-RES="image_bdp83.bin:44bedb87bacfc5217ec22cffd2b18295 bdpaudec.db:31b1901fc4114ea4911ff04757959651 font.bin:7ffd6c8c88be9d4787ba0cf36e91b424"
+RES="image_bdp83.bin:44bedb87bacfc5217ec22cffd2b18295 bdpaudec.db:31b1901fc4114ea4911ff04757959651 font.bin:6b363141da37336f88009ace6dd9a9be"
 MODS=0
 if [ ! -e $D/disable ]; then
   N=$(cat $D/bootcount 2>/dev/null); N=${N:-0}
