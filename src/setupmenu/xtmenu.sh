@@ -117,5 +117,10 @@ on)
   1) log "requested: the row appears when Setup is opened next ($(st))";;
   *) log "the Setup thread did not add the row: $(st)"; exit 1;;
   esac;;
-*) log "usage: sh xtmenu.sh on [VERSION] | status | check"; exit 2;;
+live)  # liblp.so gone (a disc plays) or loaded again at another address: the bytes the page switches at once (0 = only save)
+  loaded && [ "$(rd32 $((XM + 12)))" = 2 ] || { log "not on"; exit 0; }
+  a=$(sh $D/dvhook.sh dvaddr 2>/dev/null); case "$a" in ''|*[!0-9]*) a=0;; esac
+  f=$(sh $D/dvhook.sh fsaddr 2>/dev/null); case "$f" in ''|*[!0-9]*) f=0;; esac
+  wr32 $((XM + 144)) $a; wr32 $((XM + 176)) $f; log "live dv $a fs $f";;
+*) log "usage: sh xtmenu.sh on [VERSION] | live | status | check"; exit 2;;
 esac

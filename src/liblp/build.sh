@@ -32,4 +32,9 @@ llvm-objcopy -O binary -j .cave10 mp4/build/mp4.elf mp4/build/mp4i.bin
 [ $(stat -c %s mp4/build/mp4e.bin) -le 2556 ] || { echo "text subtitle blob does not fit vMPCMpgFilePbTest"; exit 1; }
 [ $(stat -c %s mp4/build/mp4f.bin) -le 2064 ] || { echo "tx3g style blob does not fit vMPCTestPauseWithAThr"; exit 1; }
 [ $(stat -c %s mp4/build/mp4g.bin) -le 2200 ] || { echo "MKV language list blob does not fit vMPCTestSendSetFileInf2Pipe"; exit 1; }
-md5sum mp4/build/mp4h.bin build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin mp4/build/mp4d.bin mp4/build/mp4e.bin mp4/build/mp4f.bin mp4/build/mp4g.bin
+# subtitle menu rows: the trampoline kept in the player program (rowstub.S, pc-relative, no link step)
+zig cc -target arm-freestanding-eabi $F -c rowstub.S -o build/rowstub.o
+[ -z "$(llvm-readelf -r build/rowstub.o | grep -i 'R_ARM')" ] || { echo "rowstub.S has relocations"; exit 1; }
+llvm-objcopy -O binary -j .text build/rowstub.o build/rowstub.bin
+[ $(stat -c %s build/rowstub.bin) -le 256 ] || { echo "rowstub does not fit its 256 bytes"; exit 1; }
+md5sum build/rowstub.bin mp4/build/mp4h.bin build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin mp4/build/mp4d.bin mp4/build/mp4e.bin mp4/build/mp4f.bin mp4/build/mp4g.bin

@@ -24,6 +24,9 @@ blob7 = open('mp4/build/mp4f.bin', 'rb').read()   # MP4 tx3g styles (same ELF, s
 blob8 = open('mp4/build/mp4g.bin', 'rb').read()   # MKV language list, forced subtitles (same ELF, section .cave8)
 blob9 = open('mp4/build/mp4h.bin', 'rb').read()   # Atmos in Dolby Digital Plus, audio names (same ELF, section .cave9)
 blob10 = open('mp4/build/mp4i.bin', 'rb').read()   # HDR10+ (same ELF, section .cave10)
+rowstub = open('build/rowstub.bin', 'rb').read()   # subtitle menu rows: trampoline in the player program (rowstub.S)
+RS, RS_LEN = 0x1c07700, 0x100                            # its place: the jailbreak's free .text1 (after the DLNA hook)
+assert len(rowstub) <= RS_LEN and rowstub[:4] == b'RROW'
 def bl(src, dst, op=0xeb000000):
     off = (dst - (src + 8)) >> 2
     assert -(1 << 23) <= off < (1 << 23)
@@ -184,6 +187,10 @@ rd(){{ dd if=$M bs=1 skip=$1 count=$2 2>/dev/null | hexdump -v -e "$2/1 \\"%02x\
 w4(){{ printf "$2" | dd of=$M bs=4 seek=$(( $1 / 4 )) conv=notrunc 2>/dev/null; }}
 le(){{ printf '%02x%02x%02x%02x' $(($1 & 255)) $(($1 >> 8 & 255)) $(($1 >> 16 & 255)) $(($1 >> 24 & 255)); }}
 wv(){{ w4 $1 "$(printf '\\\\x%02x\\\\x%02x\\\\x%02x\\\\x%02x' $(($2 & 255)) $(($2 >> 8 & 255)) $(($2 >> 16 & 255)) $(($2 >> 24 & 255)))"; }}
+# liblp addresses armed before in this boot: the player unloads liblp.so while a disc plays and loads it again at another
+# address afterwards, so the player program's pointers into an earlier copy (Atmos names) are ours too, not another mod's
+BASES="$B $(cat /tmp/dvhook.bases 2>/dev/null)"
+ours(){{ for b in $BASES; do [ "$1" = "$(le $((b + $2)))" ] && return 0; done; return 1; }}
 # At boot liblp.so is in the player's maps as soon as the dynamic linker has mapped it, but its data words are relocated
 # a moment later (the MP4 box table words read 0 until then). Wait for that (at most 60 s) instead of taking the
 # unrelocated words for another mod's changes: the GOT slot {RELOC_VA:#x} keeps the file's unrelocated .plt address
@@ -211,11 +218,20 @@ ROW1=00e000bfdff800f0   # b +0 ; nop ; ldr.w pc, [pc] (then the address of r_row
 rowsite(){{ for a in $ROWS; do a=$((a)); [ "$(rd $((a + 0x28)) 4)" = "$(le $STRT)" ] || continue
     c=$(rd $a 22); [ "$c" = $ROW0 ] && {{ ROW=$a; return 0; }}
     case $c in $ROW1????????02f54c52243253f82210) ROW=$a; return 0;; esac; done; ROW=; return 1; }}
+# the trampoline (rowstub.S) in the jailbreak's free .text1: the site must not jump into liblp, which the player unloads
+# while a disc plays. Its place must be zero or hold this stub; programs without .text1 get no row texts.
+RS=$(({RS:#x})); RSC={rowstub[24:].hex()}
+rstub(){{ grep -q '^01c00000-01c08000 rwxp' /proc/$P/maps || return 1
+  c=$(rd $((RS + 24)) {len(rowstub) - 24}); h=$(rd $RS 4)
+  if [ "$h" = 52524f57 ] && [ "$c" = $RSC ]; then return 0; fi
+  [ -z "$(rd $RS {RS_LEN} | tr -d 0)" ] || return 1
+  printf '{hx(rowstub)}' | dd of=$M bs=1 seek=$RS conv=notrunc 2>/dev/null
+  [ "$(rd $((RS + 24)) {len(rowstub) - 24})" = $RSC ]; }}
 # the running program's line -> SUBF OSDF LANGT STRT SDDS (nothing is patched in a program without a full match)
 playok(){{ [ "$(rd $((${{2%%:*}})) 16)" = ${{2#*:}} ] && [ "$(rd $((${{3%%:*}})) 16)" = ${{3#*:}} ] && [ "$(rd $(($4 + 0x7e * 10)) 10)" = 7e007e00656e67656e5f ] || return 1
   SUBF=$((${{2%%:*}})); OSDF=$((${{3%%:*}})); LANGT=$(($4)); STRT=$(($5)); SDDS=; shift 5
   for e in "$@"; do r=${{e#*:}}; c=$(rd $((${{e%%:*}})) 4)
-    [ "$c" = "${{r%%:*}}" ] || [ "$c" = "$(le $((B + {NLONG:#x})))" ] || [ "$c" = "$(le $((B + {NSHORT:#x})))" ] || return 1; done
+    [ "$c" = "${{r%%:*}}" ] || ours "$c" {NLONG:#x} || ours "$c" {NSHORT:#x} || return 1; done
   SDDS="$*"; return 0; }}
 SUBF=; OI=$IFS; IFS='
 '
@@ -233,11 +249,12 @@ state(){{ s=ok; for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; c=$(rd $
 restore(){{ for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; [ "$(rd $a 4)" = "${{r#*:}}" ] && w4 $a "$(esc ${{r%%:*}})"; done
   for e in $DSITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; o=${{r%%:*}}; [ "$(rd $a 4)" = "$(le $((B + ${{r#*:}})))" ] && wv $a $((B + ${{o%%,*}})); done
   for e in $ZSITES; do a=$((B + ${{e%%:*}})); [ "$(rd $a 4)" = "$(le $((B + ${{e#*:}})))" ] && wv $a 0; done
-  for e in $SDDS; do a=$((${{e%%:*}})); c=$(rd $a 4); {{ [ "$c" = "$(le $((B + {NLONG:#x})))" ] || [ "$c" = "$(le $((B + {NSHORT:#x})))" ]; }} && wv $a $((${{e##*:}})); done
+  for e in $SDDS; do a=$((${{e%%:*}})); c=$(rd $a 4); {{ ours "$c" {NLONG:#x} || ours "$c" {NSHORT:#x}; }} && wv $a $((${{e##*:}})); done
   [ -n "$SDDS" ] || return 0
   rowsite && case $(rd $ROW 8) in $ROW1) wv $ROW 0xd0f42c00; wv $((ROW + 4)) 0xa8264b07; wv $((ROW + 8)) 0x4b07781a;; esac
+  [ "$(rd $RS 4)" = 52524f57 ] && wv $((RS + 4)) 0
   T=$((STRT + 936 * 48))
-  [ "$(rd $T 4)" = "$(le $((B + {NWIDE:#x})))" ] && [ -f /tmp/dvhook-s936.bin ] && dd if=/tmp/dvhook-s936.bin of=$M bs=1 seek=$T conv=notrunc 2>/dev/null; }}
+  ours "$(rd $T 4)" {NWIDE:#x} && [ -f /tmp/dvhook-s936.bin ] && dd if=/tmp/dvhook-s936.bin of=$M bs=1 seek=$T conv=notrunc 2>/dev/null; }}
 case "$1" in
 on)
   st=$(state) || {{ echo "$st"; exit 1; }}
@@ -284,7 +301,7 @@ on)
   T=$((STRT + 936 * 48)); sd=
   if [ -n "$SDDS" ]; then n=0
     while [ "$(rd $T 4)" = 00000000 ] && [ $n -lt 20 ]; do sleep 1; n=$((n + 1)); done
-    if [ "$(rd $T 4)" = "$(le $((B + {NWIDE:#x})))" ]; then sd=1; else
+    if ours "$(rd $T 4)" {NWIDE:#x}; then sd=1; else
       sd=1; i=0; while [ $i -lt 12 ]; do a=$(rd $((T + i * 4)) 4); [ ${{#a}} = 8 ] || a=00000000; a=$((0x$(echo $a | sed 's/\\(..\\)\\(..\\)\\(..\\)\\(..\\)/\\4\\3\\2\\1/')))
         [ "$(rd $a 10)" = 53004400440053000000 ] || sd=; i=$((i + 1)); done; fi
   fi
@@ -298,20 +315,22 @@ on)
     printf 'Dolby Atmos\\000' | dd of=$M bs=1 seek=$((B + {NSHORT:#x})) conv=notrunc 2>/dev/null
     printf 'D\\000o\\000l\\000b\\000y\\000 \\000A\\000t\\000m\\000o\\000s\\000\\000\\000' | dd of=$M bs=1 seek=$((B + {NWIDE:#x})) conv=notrunc 2>/dev/null
     i=0; for e in $SDDS; do a=$((${{e%%:*}})); r=${{e#*:}}; i=$((i+1)); case $i in 4|6) v={NLONG:#x};; *) v={NSHORT:#x};; esac
-      [ "$(rd $a 4)" = "${{r%%:*}}" ] && wv $a $((B + v)); done
-    if [ "$(rd $T 4)" != "$(le $((B + {NWIDE:#x})))" ]; then
-      dd if=$M bs=1 skip=$T count=48 of=/tmp/dvhook-s936.bin 2>/dev/null
-      i=0; while [ $i -lt 12 ]; do wv $((T + i * 4)) $((B + {NWIDE:#x})); i=$((i + 1)); done
-    fi
+      c=$(rd $a 4); {{ [ "$c" = "${{r%%:*}}" ] || ours "$c" {NLONG:#x} || ours "$c" {NSHORT:#x}; }} && wv $a $((B + v)); done
+    ours "$(rd $T 4)" {NWIDE:#x} || dd if=$M bs=1 skip=$T count=48 of=/tmp/dvhook-s936.bin 2>/dev/null   # stock: keep it
+    i=0; while [ $i -lt 12 ]; do wv $((T + i * 4)) $((B + {NWIDE:#x})); i=$((i + 1)); done
     # what the TV supports (h10_tv): the getter and its handle
     for f in 0x5e3e88 0x5d87d0; do [ "$(rd $((f)) 4)" = 60feffea ] && {{ wv $((B + {syms2['h_scom']:#x})) $((f)); wv $((B + {syms2['h_hand']:#x})) $((STRT - 0x778c)); break; }}; done
     # subtitle menu rows: format and "Forced"
-    if rowsite; then
+    if rowsite && rstub; then
       wv $((B + {syms2['r_site']:#x})) $((ROW + 0x24)); wv $((B + {syms2['r_back']:#x})) $((ROW - 0x12 + 1))
-      w=$((B + {syms2['r_row']:#x})); wv $((ROW + 8)) $w; wv $((ROW + 4)) 0xf000f8df; wv $ROW 0xbf00e000
-      [ "$(rd $ROW 12)" = "$ROW1$(le $w)" ] || echo "subtitle menu rows: write failed"
+      t=$((B + {syms2['r_row']:#x})); wv $((RS + 4)) 0; wv $((RS + 16)) $((ROW - 0x12 + 1))
+      dd if=$M of=$M bs=1 skip=$t seek=$((RS + 8)) count=8 conv=notrunc 2>/dev/null   # r_row's first 8 bytes: the probe
+      wv $((RS + 4)) $t
+      w=$((RS + 24)); wv $((ROW + 8)) $w; wv $((ROW + 4)) 0xf000f8df; wv $ROW 0xbf00e000
+      [ "$(rd $ROW 12)" = "$ROW1$(le $w)" ] && [ "$(rd $((RS + 8)) 8)" = "$(rd $t 8)" ] || echo "subtitle menu rows: write failed"
     else echo "subtitle menu rows: not supported on this player program"; fi
   else echo "MKV subtitle start: not supported on this player program (stock choice)"; fi
+  grep -qx "$B" /tmp/dvhook.bases 2>/dev/null || echo $B >> /tmp/dvhook.bases
   echo "dvhook ON";;
 forced)  # MKV: start on the forced subtitles of the Subtitle Language (Auto: the menu language), or none
   [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}

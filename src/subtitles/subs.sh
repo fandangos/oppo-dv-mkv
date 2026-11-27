@@ -54,17 +54,23 @@ rd(){ dd if=$M bs=1 skip=$1 count=$2 2>/dev/null | hexdump -v -e "$2/1 \"%02x\""
 md(){ dd if=$M bs=1 skip=$1 count=$2 2>/dev/null | md5sum | cut -d' ' -f1; }
 # Colours: bdpprog ARGB table + preview table, liblp RGBA palette mirror. Written only over the stock values.
 L=$((0x$B + 0x6aa790)); t=$(md $COL 120); lt=$(md $((L + 40)) 96)
-if [ "$t" = "${TAB_MD5#* }" ] && [ "$lt" = "${LIB_TAB_MD5#* }" ]; then log "layout $LAY, pid=$P: colours already patched"
-elif [ "$t" = "${TAB_MD5%% *}" ] && [ "$lt" = "${LIB_TAB_MD5%% *}" ]; then
+# The two halves separately: the player unloads liblp.so while a disc plays and loads a stock copy afterwards (dvmkv.sh
+# runs this again then), while the program's tables stay patched.
+ts=; ls=
+case $t in "${TAB_MD5%% *}") ts=1;; "${TAB_MD5#* }") ;; *) t=bad;; esac
+case $lt in "${LIB_TAB_MD5%% *}") ls=1;; "${LIB_TAB_MD5#* }") ;; *) lt=bad;; esac
+if [ "$t" = bad ] || [ "$lt" = bad ]; then log "colour tables: unexpected content ($t $lt), skipped"
+elif [ -z "$ts$ls" ]; then log "layout $LAY, pid=$P: colours already patched"
+else
   for e in $PATCH; do
     i=${e%%:*}; c=${e#*:}; r=${c%????}; g=${c#??}; g=${g%??}; b=${c#????}
-    printf "\xff\x$r\x$g\x$b" | dd of=$M bs=1 seek=$((COL + 4*i)) conv=notrunc 2>/dev/null
-    printf "\x$r\x$g\x$b"     | dd of=$M bs=1 seek=$((L + 4*(10+i))) conv=notrunc 2>/dev/null
+    [ -n "$ts" ] && printf "\xff\x$r\x$g\x$b" | dd of=$M bs=1 seek=$((COL + 4*i)) conv=notrunc 2>/dev/null
+    [ -n "$ls" ] && printf "\x$r\x$g\x$b"     | dd of=$M bs=1 seek=$((L + 4*(10+i))) conv=notrunc 2>/dev/null
   done
-  i=0; for c in $PREV; do   # outline preview colours (ARGB), right after the 24-entry table
-    printf "\xff\x$(echo $c|cut -c1-2)\x$(echo $c|cut -c3-4)\x$(echo $c|cut -c5-6)" | dd of=$M bs=1 seek=$((COL + 0x60 + 4*i)) conv=notrunc 2>/dev/null; i=$((i+1)); done
-  log "layout $LAY, pid=$P patched: $PATCH"
-else log "colour tables: unexpected content ($t $lt), skipped"; fi
+  [ -n "$ts" ] && { i=0; for c in $PREV; do   # outline preview colours (ARGB), right after the 24-entry table
+    printf "\xff\x$(echo $c|cut -c1-2)\x$(echo $c|cut -c3-4)\x$(echo $c|cut -c5-6)" | dd of=$M bs=1 seek=$((COL + 0x60 + 4*i)) conv=notrunc 2>/dev/null; i=$((i+1)); done; }
+  log "layout $LAY, pid=$P patched ($([ -n "$ts" ] && echo "program ")$([ -n "$ls" ] && echo liblp)): $PATCH"
+fi
 # Anti-aliased glyphs: FT_Load_Char flags 0x1004 (RENDER|MONOCHROME) -> 6 (RENDER|NO_HINTING)
 cur=$(rd $AA 4)
 if [ "$cur" = 042001e3 ]; then printf '\x06\x20\xa0\xe3' | dd of=$M bs=1 seek=$AA conv=notrunc 2>/dev/null; log "antialias+nohinting on"
