@@ -69,6 +69,7 @@ and [External subtitles for disc images](#external-subtitles-for-disc-images-v24
 - [Oppo bugs fixed: subtitles and picture](#oppo-bugs-fixed-subtitles-and-picture)
 - [Better subtitles](#better-subtitles)
 - [MP4 files (v1.8.0)](#mp4-files-v180)
+- [Factory menu](docs/FACTORY.md)
 - [Video options (v2.0.2)](#video-options)
 - [Setup > Extras page (v2.1.2)](#setup--extras-page-v212)
 - [ISO files under Music (v2.2.0)](#iso-files-under-music-v220)
