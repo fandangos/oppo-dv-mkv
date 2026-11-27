@@ -312,8 +312,11 @@ segment: 2 italic, 4 bold, 8 underline. State: `struct st` +0x134 (top, wrap wid
 `font_sub.bin`, Japanese → `font_jp.bin`, Russian → `font_rus.bin`, others → `font.bin` (a 12-byte header: u32 LE 1,
 u32 LE 8, u32 BE length, then TrueType). `src/subtitles/mkfont.py` builds the shipped `font.bin` from the player's own
 `font.bin` and `font_sub.bin`: ő ű Ő Ű from ó ú Ó Ú with the acute contour doubled, ș ț Ș Ț mapped to the cedilla
-glyphs, and the 2,027 Big5 level-1 characters missing from `font.bin` copied from `font_sub.bin` (scaled from 256 to
-1024 units per em and matched on a shared character). The boot wrapper swaps it into `/res` when its md5 matches.
+glyphs, the 2,027 Big5 level-1 characters missing from `font.bin` copied from `font_sub.bin` (scaled from 256 to
+1024 units per em and matched on a shared character), and since v2.4.1 ď ť ľ Ľ rebuilt with the apostrophe-like
+caron (the font's `quoteright` at 0.8, right of the stem's top at ascender / cap height; the font had a full caron
+above them). The original timestamps are kept, so the same inputs give the same file. The boot wrapper swaps it into
+`/res` when its md5 matches (`6b363141...`).
 
 ## Part 1g: player program, ISO files under Music (v2.2.0)
 
@@ -1497,7 +1500,9 @@ Ports of autoABC / UOPfree (DamnFine815, MIT), as own source in `src/uopfree` an
   patterns) and `bdcallgraph` (BD-J call graph), each checked against the original tools with thousands of generated
   discs (0 differences).
 - With `/mnt/ubi_boot/autoABC` (or a standalone UOPfree: `/mnt/ubi_boot/UOPfree`, `bluray_uop`) present, `dvmkv.sh`
-  starts neither, and the Extras page only saves the options.
+  starts neither, and the Extras page only saves the options. Since v2.4.1 `install.sh` refuses to install while
+  either is there (also autoABC's launcher as the boot hook, or an older install chained to it); uninstalling still
+  gives a chained autoABC its boot hook back.
 
 ## Part 13: external subtitles of disc images (`extsub.sh`, `extsub.bin`, `extmulti.bin`, v2.4.0)
 
@@ -1524,3 +1529,48 @@ list of cues at `+0x4e0` (records of 0x114 bytes: start ms, end ms, 256 bytes of
   through `c_mem_alloc`, and starts the parse thread) and the info banner (`0x8f4806` name, `0x8f4b90` total). Each
   place is checked against its original 8 bytes; `extsub.sh off` puts them back. The phone app's list
   (`bd_request_get_subtt_menu_list`, `0xaadd54`) still counts one file.
+
+## Part 14: discs unload liblp.so and the splitter module (`rowstub.S`, `dvmkv.sh relp`, v2.4.1)
+
+**What the player does.** While a disc (physical, or an image it plays through the disc path) plays, `bdpprog.1`
+unloads `liblp.so`; its range is then reused, e.g. by a `/dev/bdkmem` mapping (`rwxs`, device memory). When the disc
+stops, liblp is loaded again at another address (seen: `3bf4f000` -> `2e32c000` -> `2e0b4000`), as a fresh copy
+without any RAM patch. The `splitter` kernel module is unloaded and loaded again with it (here at the same address),
+also fresh: `hvccfix`, `ftrfix` and `mp4elfix` read `off` afterwards. All of this predates v2.3.0; until v2.4.1 every
+liblp and splitter fix stayed off after a disc until the next restart.
+
+**The v2.3.0 remote bug.** The subtitle menu row patch (Part 1, v2.3.0: `ROWS`, RU `0xa93b88`) put `ldr.w pc, [pc]`
+with liblp's `r_row` address into the player program. With liblp gone, SUBTITLE on a disc ran `/dev/bdkmem` contents
+as code: the thread that handles the keys died, the rest of the player went on (IP status queries answered, an IP
+`#SUB` got no reply, no forbidden sign), and every later key was ignored. Restoring the 12 stock bytes in RAM made the
+same disc work.
+
+**The trampoline** (`src/liblp/rowstub.S`, 240 bytes, no relocations, at `0x1c07700` in the jailbreak's free
+`.text1`, between the DLNA hook and the boot message stub; programs without `.text1` get no row patch). Header: magic
+`RROW`, target (`r_row`, 0 = off), the 8 bytes expected there, the return address (`ROW - 0x12 + 1`), a counter of
+stock paths taken. The site jumps to the entry (+24). It reads the target's first 8 bytes with `process_vm_readv` on
+its own pid (syscall 376; `EFAULT` instead of a fault for an unmapped range or device memory) and jumps to `r_row`
+only when they match; otherwise it does the stock thing at the site (a final `" "` on the row text at `sp+0x98`) and
+returns. `dvhook.sh on` writes the stub (place zero or ours), the header, then the site; `off` clears the target.
+
+**Pointers into an earlier liblp.** The Atmos names (Part 1, `SDDS` list and osdmsg string 936) are pointers from the
+program into liblp's bss. After a reload they point into the old range; they are only read for audio code 8, which
+only a patched liblp produces, so nothing reads them before they are set again. `dvhook.sh` keeps the bases it armed
+in `/tmp/dvhook.bases` and treats a pointer into any of them as its own (`ours`): `on` points it at the new copy,
+`off` puts the stock value back, and the saved stock 936 table (`/tmp/dvhook-s936.bin`) is never overwritten with old
+pointers. The Setup > Extras page keeps the absolute addresses of the Dolby Vision and forced_subs bytes (Part 8):
+`xtmenu.sh live` sets them to 0 while liblp is gone (the page then only saves) and to the new ones when it is back.
+
+**Putting everything back.** `dvmkv.sh` writes `/tmp/oppodv-lpwatch.sh` and runs it with no file open (only
+`/dev/null` and its own script in `/tmp`, cwd `/`; nothing of ours may hold `/mnt/ubi_boot` while the player is
+switched off). Every second it compares liblp's maps line and the splitter's address in `/proc/modules`; on a change
+it runs `dvmkv.sh relp` (output appended to `dvmkv.log`): liblp gone -> `xtmenu.sh live`; liblp back -> wait for the
+splitter module (10 s), `hvccfix`/`ftrfix`/`mp4elfix on`, `dvhook.sh on`, `lp_opts` (the same function the boot uses:
+dv off, 25p, hvcC, HDR10+ options, language list, forced subtitles), `subs.sh` (it now patches the program's and
+liblp's halves of the colour tables separately), `xtmenu.sh live`. About 8-10 s after the disc stops.
+
+**Boot debugging.** With `$D/bootdebug` present, `dvmkv.sh` writes every log line also to `boot.log` (synced at once,
+a `start` line before each part; the previous boot in `boot.log.1`) and runs `/tmp/oppodv-bootmon.sh` for 180 s:
+every ~4 s uptime, thread count, the busiest threads, threads in R or D state with their wait channel, the Auto
+Region gate counters, and new kernel log lines (busybox `dmesg` copied to `/tmp`: the firmware has none; the buffer is
+full, so new lines are found after the last one seen) into `bootmon.log` (`.1` = the previous boot).

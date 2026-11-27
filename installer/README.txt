@@ -39,8 +39,8 @@ formats whatever the receiver reports, for a zone 2 that reports stereo; unteste
 decode them gives silence or noise.
 Since v2.4.0 (beta): bd_region = on (off as shipped): the region of each Blu-ray (A/B/C) is set from the disc itself.
 uop_free = on (off as shipped): remote keys work where a disc forbids them. Both also in Setup > Extras; ports of
-autoABC / UOPfree by DamnFine815 (MIT). With autoABC or standalone UOPfree installed, those are left as they are and
-ours stay off. ext_subs (on): several subtitle files next to a disc image or Blu-ray folder (Title.srt, Title.en.srt,
+autoABC / UOPfree by DamnFine815 (MIT). Since v2.4.1 the installer refuses while standalone autoABC or UOPfree is
+installed: remove it with its own uninstaller first. ext_subs (on): several subtitle files next to a disc image or Blu-ray folder (Title.srt, Title.en.srt,
 Title.pt-BR.srt ...), each in the subtitle menu under its language; <i> and other tags no longer drawn as text.
 The boot message now reads "OPPO-DV-MKV <version>" / "by Vitor Dall'Acqua".
 

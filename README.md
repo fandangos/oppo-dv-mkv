@@ -553,11 +553,13 @@ Both are ports of [autoABC and UOPfree by DamnFine815](https://github.com/DamnFi
 in the player and the same detection, rewritten as our own C and assembly (no prebuilt binaries), and checked
 against the originals with thousands of generated test discs (no differences). RU 65-0131 player program family only.
 
-**With autoABC or standalone UOPfree installed:** the installer leaves them as they are and says so in its result
-file; oppo-dv-mkv's Auto Region / UOP Free then stay off at every boot (two would patch the same places), whatever
-the options say. To use ours instead, remove autoABC with **its own matching uninstaller** (see autoABC's
-documentation: it also changes jb_overlay's `brick_monitor`; never delete its files by hand), restart, and turn the
-options on. The boot wrapper is unchanged since v2.3.0, so autoABC 1.1.3 keeps recognising it.
+**Standalone autoABC or UOPfree:** not supported next to oppo-dv-mkv since v2.4.1. The installer refuses (and changes
+nothing) while either is installed, and says why in its result file. Remove autoABC with **its own matching
+uninstaller** (see autoABC's documentation: it also changes jb_overlay's `brick_monitor`; never delete its files by
+hand), unplug the player for 10 seconds, then install oppo-dv-mkv and turn Auto Region / UOP Free on in Setup > Extras.
+If oppo-dv-mkv v2.4.0 was installed on top of autoABC, run the oppo-dv-mkv uninstall zip first (it gives the boot hook
+back to autoABC), then autoABC's uninstaller. Should autoABC be installed afterwards anyway, oppo-dv-mkv's Auto Region /
+UOP Free stay off (two would patch the same places).
 
 ## External subtitles for disc images (v2.4.0)
 
@@ -922,6 +924,8 @@ are not.
   Vision capability from your TV/receiver chain at boot (the HDMI EDID handshake). This happens sometimes after a
   power cycle when the TV or receiver was not ready. Turn the TV (or the receiver) off and on again. In this state
   playback can also stall at start-up; the fix is the same.
+- **Remote keys dead while a Blu-ray plays (v2.3.0 and v2.4.0), or MKV Dolby Vision / subtitle fixes gone after
+  watching a disc until the player is restarted (all versions before v2.4.1):** fixed in v2.4.1-beta, see the changelog.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
@@ -2084,6 +2088,27 @@ requests.
 
 ## Changelog
 
+- **v2.4.1-beta: remote keys on discs, MKV fixes back after a disc.** A beta: tested on one player (RU).
+  - **Remote keys dead while a disc plays (since v2.3.0):** pressing SUBTITLE during a Blu-ray killed the player's key
+    handling (no forbidden sign; every later key ignored until a restart). The player unloads its file playback
+    library while a disc plays, and v2.3.0's subtitle menu rows (format, "Forced") jumped into it. The jump now goes
+    through a small piece of code kept in the player program, which only goes on into the library while it is there.
+  - **After any disc, the MKV/MP4 fixes were gone until the next restart (every version):** the player loads that
+    library and the `splitter` kernel module again after a disc, without our changes: Dolby Vision from MKV, the
+    language list, subtitle improvements, 25p, HDR10+, and the hvcC / MP4 stop / MP4 profile 7 fixes. They are now
+    put back automatically about 10 seconds after the disc stops (`dvmkv.log`: `liblp: loaded again at ...`).
+  - Setup > Extras no longer switches Dolby Vision / forced subtitles in memory the player has given back while a
+    disc plays (the setting is saved and applied when the library is back).
+  - Stock US and Cambridge CXUHD player programs (no jailbreak `.text1` area): the subtitle menu rows no longer show
+    the format and "Forced"; everything else as before.
+  - **Czech and Slovak letters:** ď ť ľ Ľ in subtitles and menus with the apostrophe-like caron beside the letter
+    (they had a full caron on top). Ď and the other carons are unchanged.
+  - **Setup > Extras in Russian:** "Исходные 25p / 30p" for the 25p/30p row.
+  - **Standalone autoABC / UOPfree are not supported any more:** Auto Region and UOP Free are built in (Setup >
+    Extras). The installer refuses while either is installed, changes nothing and says how to remove it; see
+    [Auto Region and UOP Free](#auto-region-and-uop-free-v240).
+  - Boot debugging for hangs at power-on: create an empty file `bootdebug` in `/mnt/ubi_boot/oppo-dv-mkv` and the boot
+    is logged step by step to `boot.log` / `bootmon.log` there (the previous boot in `.1`).
 - **v2.4.0-beta: Auto Region, UOP Free, several external subtitles for disc images, install message.** A beta: tested
   on one player (RU).
   - **Auto Region** (`bd_region`, off; also in Setup > Extras): the region of each Blu-ray set from the disc (HDMV and
