@@ -18,7 +18,7 @@ static const u16 *const T_LABEL[NOPT][NLANG] = {
     u"Tylko napisy wymuszone", u"仅强制字幕", u"僅強制字幕", u"強制字幕のみ", u"Только форс. субтитры" },
   { u"Native 25p / 30p", u"Natives 25p / 30p", u"25p / 30p natif", u"25p / 30p nativo", u"25p / 30p nativo",
     u"Äkta 25p / 30p", u"Native 25p / 30p", u"Natywne 25p / 30p", u"原生 25p / 30p", u"原生 25p / 30p",
-    u"ネイティブ 25p / 30p", u"Родные 25p / 30p" },
+    u"ネイティブ 25p / 30p", u"Исходные 25p / 30p" },
   { u"Home Menu Refresh", u"Hauptmenü-Bildrate", u"Fréq. menu d'accueil", u"Frec. menú de inicio",
     u"Frequenza menu home", u"Huvudmenyns frekvens", u"Hoofdmenu verversing", u"Odśw. menu głównego",
     u"主菜单刷新率", u"主選單更新率", u"ホームメニュー周波数", u"Частота главного меню" },
