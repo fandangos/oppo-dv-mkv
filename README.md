@@ -1,5 +1,13 @@
 # oppo-dv-mkv
 
+> [!IMPORTANT]
+> **GitHub Issues are for issues:** bugs, crashes, files that don't play, things that broke after installing.
+> Please include the version, what you did, what you expected and what happened.
+>
+> **Feature requests go to [Ko-fi](https://ko-fi.com/vitordallacqua)**, attached to a coffee. It won't get them built
+> any faster (see [Supporting this work](#supporting-this-work)), but at least someone gets a coffee out of it, which is
+> more than the 47th "please add support for everything" issue ever achieved.
+
 **Dolby Vision from MKV on the Oppo UDP-203 (jailbroken):** profile 5, profile 8.x and **profile 7 FEL/MEL** (dual layer,
 single track) play as real Dolby Vision, with audio, from MKV files. The original files play as they are, with no
 remuxing or conversion.
